@@ -18,22 +18,22 @@ const normalizeProductPricesSeeder = require("./NormalizeProductPricesSeeder");
 const migratePoojaPricingSeeder = require("./fixPoojaPricing");
 const runSeeder = async () => {
   try {
-    await createSuperAdminUser();
-    await initializeRankings();
-    await createDefaultCategories();
-    await createSessionSetting();
-    await createSetting();
+    // await createSuperAdminUser();
+    // await initializeRankings();
+    // await createDefaultCategories();
+    // await createSessionSetting();
+    // await createSetting();
     // await normalizeUsers();
     // await seedLanguages();
     // await seedSpecializations();
     // // await updateAstrologers();
     // await createAstrologerUser();
     // await resetAstrologerPasswords();
-    await createVendorUser();
-    await createAdminUser();
-    await seedPooja();
-    await normalizeProductPricesSeeder();
-    await migratePoojaPricingSeeder();
+    // await createVendorUser();
+    // await createAdminUser();
+    // await seedPooja();
+    // await normalizeProductPricesSeeder();
+    // await migratePoojaPricingSeeder();
     await logger.info("Seeder: All seeding tasks completed successfully.");
   } catch (error) {
     logger.error("Seeder: Failed to seed admin user:", error);
