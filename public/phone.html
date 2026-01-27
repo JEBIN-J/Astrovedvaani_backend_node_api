@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PhonePe Wallet Recharge</title>
+</head>
+<body>
+  <h2>PhonePe Wallet Recharge Test</h2>
+
+  <!-- Input for Access Token -->
+  <label>Access Token:</label>
+  <input type="text" id="accessToken" placeholder="Paste token here" style="width: 400px;" required><br><br>
+
+  <form id="rechargeForm">
+    <label>Amount (INR):</label>
+    <input type="number" id="amount" value="1" required><br><br>
+    <button type="submit">Pay via PhonePe</button>
+  </form>
+
+  <script>
+    document.getElementById('rechargeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const accessToken = document.getElementById('accessToken').value.trim();
+      if (!accessToken) {
+        alert("Please provide a valid access token!");
+        return;
+      }
+
+      const amount = parseFloat(document.getElementById('amount').value);
+
+      try {
+        // Step 1: Call your backend to initiate recharge
+        const resp = await fetch('https://api.astrowala.ai/api/user/v1/wallet/initiate-recharge', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({ amount, provider: 4114 })
+        });
+
+        const data = await resp.json();
+        console.log('API Response:', data);
+
+        // Step 2: Redirect user to PhonePe checkout page
+        if (data.success && data.redirect_url) {
+          const checkoutUrl = data.redirect_url;
+          console.log("Redirecting to:", checkoutUrl);
+          window.location.href = checkoutUrl;
+        } else {
+          alert("Payment initiation failed. Check console for details.");
+        }
+      } catch (err) {
+        console.error("Error calling initiate-recharge:", err);
+        alert("Error occurred. Check console.");
+      }
+    });
+  </script>
+</body>
+</html>

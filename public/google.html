@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Google OAuth Authorization Code Flow</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: auto; padding: 20px; }
+    button { padding: 10px 20px; background: #4285F4; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    button:hover { background: #3367D6; }
+    #result { margin-top: 20px; white-space: pre-wrap; background: #f5f5f5; padding: 10px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Login with Google</h1>
+  
+  <button id="loginGoogleBtn">Login with Google</button>
+  
+  <div id="result"></div>
+
+  <script>
+    const BACKEND_LOGIN_URL = "/api/auth/google/login"; // Your backend endpoint
+
+    document.getElementById('loginGoogleBtn').addEventListener('click', () => {
+      window.location.href = BACKEND_LOGIN_URL;
+    });
+
+    // Check if backend redirected back with token or message
+    window.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      
+      // Example: ?message=Google%20login%20successful
+      const message = params.get('message');
+      const userName = params.get('name'); // optional
+      if (message) {
+        const resultDiv = document.getElementById('result');
+        resultDiv.innerHTML = `<strong>${message}</strong>` + (userName ? `<br>Welcome, ${userName}!` : '');
+      }
+    });
+  </script>
+</body>
+</html>

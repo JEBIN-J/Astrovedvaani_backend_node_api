@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Google OAuth Code Exchange Test</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: auto; padding: 20px; }
+    button { padding: 10px 20px; background: #4285F4; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    button:hover { background: #3367D6; }
+    #result { margin-top: 20px; white-space: pre-wrap; background: #f5f5f5; padding: 10px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Login with Google (Code Exchange Flow)</h1>
+  <button id="loginBtn">Login with Google</button>
+  <div id="result"></div>
+
+  <script>
+    async function getClientId() {
+      const res = await fetch("https://api.astrowala.app/api/auth/google/client-id");
+      const data = await res.json();
+      if (!data.success) throw new Error("Could not fetch clientId");
+      return data.clientId;
+    }
+
+    async function loginWithGoogle() {
+      try {
+        const clientId = await getClientId();
+
+        // Build Google OAuth URL manually
+        const redirectUri = window.location.origin + "/google-client.html"; // adjust if needed
+        const params = new URLSearchParams({
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          response_type: "code",
+          scope: "openid email profile",
+          access_type: "offline",
+          prompt: "consent"
+        });
+
+        // Redirect to Google OAuth
+        window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+      } catch (err) {
+        document.getElementById("result").textContent = "Error: " + err.message;
+      }
+    }
+
+    // After redirect back from Google
+    async function handleRedirect() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get("code");
+      if (code) {
+        document.getElementById("result").textContent = "Got code: " + code + "\nExchanging...";
+
+        const res = await fetch("https://api.astrowala.app/api/auth/google/exchange", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code })
+        });
+        const data = await res.json();
+        document.getElementById("result").textContent = JSON.stringify(data, null, 2);
+      }
+    }
+
+    document.getElementById("loginBtn").addEventListener("click", loginWithGoogle);
+    handleRedirect();
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+node_modules/
+.env.local
+.env.production
+.env
+logs
+# public/*
+# !public/code.html
+# !public/google.html
+# /controller/kundliSection/
+# /services/kundli/
+# /routes/ksRoutes.js

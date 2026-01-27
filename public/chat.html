@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Socket Chat Request</title>
+  <!-- Load Socket.IO client -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+  <h2>Send Chat Request</h2>
+  
+  <label for="astrologerId">Astrologer ID:</label>
+  <input type="text" id="astrologerId" placeholder="Enter astrologer ID">
+  <button id="sendBtn">Send Chat Request</button>
+
+  <pre id="output"></pre>
+
+  <script>
+    const SOCKET_URL = "http://35.208.89.220:5300";
+
+    // 🔹 Your JWT token
+    const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2OGI1ODUwZjU2ZjgxYzkxNzcxNDQ2YjkiLCJyb2xlIjoxMDAsImlzQWkiOmZhbHNlLCJzZXNzaW9uSWQiOiI3OGMzN2U5ZTkyZWIwMDQyZjk3NWY3ZmNiZWNjMjk2MCIsInRva2VuVHlwZSI6ImFjY2VzcyIsImlhdCI6MTc1Njc5Mjc0NywiZXhwIjoxODQzMTkyNzQ3fQ.rO4pDe2SotQqXXxgLv7ztZp0uyq5ifjwahvqJ60q6Ek";
+
+    // 🔹 Connect with accessToken (matches backend middleware)
+    const socket = io(SOCKET_URL, {
+      auth: {
+        accessToken: TOKEN
+      }
+    });
+
+    const output = document.getElementById("output");
+
+    socket.on("connect", () => {
+      log(`✅ Connected with ID: ${socket.id}`);
+    });
+
+    socket.on("connect_error", (err) => {
+      log("❌ Connection Error: " + err.message);
+    });
+
+    socket.on("disconnect", () => {
+      log("❌ Disconnected from server");
+    });
+
+    socket.on("chat_request_received", (data) => {
+      log("📩 Chat Request Received: " + JSON.stringify(data, null, 2));
+    });
+
+    document.getElementById("sendBtn").onclick = () => {
+      const astrologerId = document.getElementById("astrologerId").value;
+      if (!astrologerId) return alert("Please enter astrologerId");
+
+      socket.emit("chat_request_send", { astrologerId }, (response) => {
+        log("📤 Server Response: " + JSON.stringify(response, null, 2));
+      });
+    };
+
+    function log(msg) {
+      output.textContent += msg + "\n";
+    }
+  </script>
+</body>
+</html>
