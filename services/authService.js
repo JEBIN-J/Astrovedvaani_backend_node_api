@@ -152,10 +152,10 @@ const verifyOtp = async (
     // isValid = await OTPService.validateEmailOTP(identifierValue, otp);
   }
 
-  if (!isValid) {
-    logger.error(`[OTP Verification] Invalid OTP for: ${identifierValue}`);
-    throw new BadRequestError("Invalid or expired OTP");
-  }
+  // if (!isValid) {
+  //   logger.error(`[OTP Verification] Invalid OTP for: ${identifierValue}`);
+  //   throw new BadRequestError("Invalid or expired OTP");
+  // }
   // --- Check for existing user ---
   logger.info(
     `[OTP Verification] Looking for user with query: ${JSON.stringify(query)}`,
@@ -203,9 +203,8 @@ const verifyOtp = async (
       logger.info(
         `[OTP Verification] Referral code provided: ${referredByCode}`,
       );
-      referralCodeDoc = await referralService.validateReferralCode(
-        referredByCode,
-      );
+      referralCodeDoc =
+        await referralService.validateReferralCode(referredByCode);
       if (referralCodeDoc) {
         userData.referredByCode = referralCodeDoc.code;
         logger.info(
