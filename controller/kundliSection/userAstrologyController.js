@@ -25,7 +25,7 @@ exports.createKundli = asyncHandler(async (req, res) => {
     const parts = data.birthDate.split(/[-/]/);
     if (parts.length !== 3) {
       throw new BadRequestError(
-        "Invalid birthDate format (expected DD/MM/YYYY or YYYY/MM/DD)",
+        "Invalid birthDate format (expected DD/MM/YYYY or YYYY/MM/DD)"
       );
     }
     let day, month, year;
@@ -51,6 +51,7 @@ exports.createKundli = asyncHandler(async (req, res) => {
   const kundli = await userAstrologyService.createKundli(userId, data);
   res.status(201).json({ success: true, data: kundli });
 });
+
 
 exports.getMyKundlis = asyncHandler(async (req, res) => {
   const userId = req.user._id;

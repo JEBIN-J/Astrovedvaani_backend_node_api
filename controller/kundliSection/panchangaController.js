@@ -3,25 +3,20 @@ const asyncHandler = require("../../middlewares/asyncHandler");
 const panchangService = require("../../services/kundli/panchangService");
 
 const getPanchang = asyncHandler(async (req, res) => {
-  const idParam = req.query.id?.trim();
-  const isRelative = Boolean(idParam);
-
-  const userId = isRelative ? idParam : req.user?._id;
-
-  const { date, location, tz } = req.query;
+  const { date, location, tz, lang } = req.query;
+  console.log("Request received for Panchang:", { date, location, tz, lang });
+  const userId = req.user?._id;
   const requestStartTime = Date.now();
-
   if (!date) throw new BadRequestError("date is required");
   if (!location) throw new BadRequestError("location is required");
   if (tz === undefined) throw new BadRequestError("tz is required");
-
   const panchangData = await panchangService.getPanchangData({
-    userId, //  id-based userId
+    userId,
     date,
     location,
     tz,
+    lang,
   });
-
   res.status(200).json(panchangData);
 });
 

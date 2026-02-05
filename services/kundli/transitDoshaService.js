@@ -7,7 +7,7 @@ const { query } = require("express");
 const { BadRequestError } = require("../../errors");
 const User = require("../../models/User");
 const API = require("./api").default;
-
+const { getSaasHeaders } = require("../../utils/apiHeader");
 const getDosha = async (userId, id, query = {}, isQuery = false) => {
   logger.info(
     `getDosha called for userId=${userId}, id=${id}, query=${JSON.stringify(
@@ -50,8 +50,8 @@ const getDosha = async (userId, id, query = {}, isQuery = false) => {
   const cacheSuffix = id
     ? `dosha-astro-${id}`
     : userId
-    ? `dosha-user-${userId}`
-    : `dosha-${dob}-${tob}-${birthPlace}-${tz}`;
+      ? `dosha-user-${userId}`
+      : `dosha-${dob}-${tob}-${birthPlace}-${tz}`;
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
     cacheSuffix,
@@ -65,7 +65,10 @@ const getDosha = async (userId, id, query = {}, isQuery = false) => {
 
   const apiUrl = API.DOSHA({ dob, tob, birthPlace, tz, lang });
   logger.info(`Fetching Dosha from API: ${apiUrl}`);
-  const response = await axios.get(apiUrl);
+  const response = await axios.get(apiUrl, {
+    headers: getSaasHeaders(),
+    timeout: 15000,
+  });
   await CacheService.set(cacheKey, response.data, 24 * 60 * 60);
   logger.info(`Cached Dosha for key=${cacheKey}`);
 
@@ -167,21 +170,21 @@ const getTransitPlanets = async (userId, id, query = {}, isQuery = false) => {
   const cacheSuffix = id
     ? "transit-astro-" + id + "-" + transit_date + "-" + transit_time
     : userId
-    ? "transit-user-" + userId + "-" + transit_date + "-" + transit_time
-    : "transit-" +
-      dob +
-      "-" +
-      tob +
-      "-" +
-      birthPlace +
-      "-" +
-      tz +
-      "-" +
-      transit_date +
-      "-" +
-      transit_time +
-      "-" +
-      transitPlace;
+      ? "transit-user-" + userId + "-" + transit_date + "-" + transit_time
+      : "transit-" +
+        dob +
+        "-" +
+        tob +
+        "-" +
+        birthPlace +
+        "-" +
+        tz +
+        "-" +
+        transit_date +
+        "-" +
+        transit_time +
+        "-" +
+        transitPlace;
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
     cacheSuffix,
@@ -207,7 +210,10 @@ const getTransitPlanets = async (userId, id, query = {}, isQuery = false) => {
     transitPlace,
   });
   logger.info("Fetching Transit Planets from API: " + apiUrl);
-  const response = await axios.get(apiUrl);
+  const response = await axios.get(apiUrl, {
+    headers: getSaasHeaders(),
+    timeout: 15000,
+  });
   await CacheService.set(cacheKey, response.data, 24 * 60 * 60);
   logger.info("Cached Transit Planets for key=" + cacheKey);
   return response.data;

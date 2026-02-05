@@ -1,4 +1,5 @@
-const BASE_URL = "https://kundali.astrovedvanni.com";
+const BASE_URL = "https://astrologyapi.nexthikes.in/api/";
+
 const API = {
   LOCATION_SUGGESTIONS: (input) =>
     `${BASE_URL}/location/suggestions?input=${encodeURIComponent(input)}`,
@@ -22,7 +23,7 @@ const API = {
     girl_birthPlace,
     lang = "en",
   }) =>
-    `${BASE_URL}/api/match-making?boy_dob=${encodeURIComponent(
+    `${BASE_URL}v1/match/gun-milan?boy_dob=${encodeURIComponent(
       boy_dob,
     )}&boy_tob=${encodeURIComponent(boy_tob)}&boy_tz=${encodeURIComponent(
       boy_tz,
@@ -35,23 +36,25 @@ const API = {
     )}&girl_birthPlace=${encodeURIComponent(
       girl_birthPlace,
     )}&lang=${encodeURIComponent(lang)}`,
-  PANCHANG: ({ date, location, tz }) =>
-    `${BASE_URL}/api/panchang?date=${encodeURIComponent(
+  PANCHANG: ({ date, location, tz, lang = "en" }) =>
+    `${BASE_URL}v1/panchang/daily?date=${encodeURIComponent(
       date,
-    )}&location=${encodeURIComponent(location)}&tz=${encodeURIComponent(tz)}`,
+    )}&location=${encodeURIComponent(location)}&tz=${encodeURIComponent(
+      tz,
+    )}&lang=${encodeURIComponent(lang)}`,
 
   DAILY_HOROSCOPE: ({ zodiac, date, lang = "en" }) =>
-    `${BASE_URL}/api/horoscope?type=daily&zodiac=${encodeURIComponent(
+    `${BASE_URL}v1/horo?type=daily&zodiac=${encodeURIComponent(
       zodiac,
     )}&date=${encodeURIComponent(date)}&lang=${encodeURIComponent(lang)}`,
 
   WEEKLY_HOROSCOPE: ({ zodiac, week = "next", lang = "en" }) =>
-    `${BASE_URL}/api/horoscope?type=weekly&zodiac=${encodeURIComponent(
+    `${BASE_URL}v1/horo?type=weekly&zodiac=${encodeURIComponent(
       zodiac,
     )}&week=${encodeURIComponent(week)}&lang=${encodeURIComponent(lang)}`,
 
   MONTHLY_HOROSCOPE: ({ zodiac, lang = "en" }) =>
-    `${BASE_URL}/api/horoscope?type=monthly&zodiac=${encodeURIComponent(
+    `${BASE_URL}v1/horo?type=monthly&zodiac=${encodeURIComponent(
       zodiac,
     )}&lang=${encodeURIComponent(lang)}`,
 
@@ -60,7 +63,7 @@ const API = {
     year = new Date().getFullYear(),
     lang = "en",
   }) =>
-    `${BASE_URL}/api/horoscope?type=yearly&zodiac=${encodeURIComponent(
+    `${BASE_URL}v1/horo?type=yearly&zodiac=${encodeURIComponent(
       zodiac,
     )}&year=${encodeURIComponent(year)}&lang=${encodeURIComponent(lang)}`,
 
@@ -75,67 +78,53 @@ const API = {
     `${BASE_URL}/api/goodbaddays?zodiac=${encodeURIComponent(zodiac)}`,
 
   KUNDLI: ({
-    day,
-    month,
-    year,
-    hour,
-    min,
+    dob, // DD-MM-YYYY
+    tob, // HH:mm
     tz,
     lang = "en",
     name,
     birthPlace,
   }) =>
-    `${BASE_URL}/api/kundli?day=${encodeURIComponent(
-      day,
-    )}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(
-      year,
-    )}&hour=${encodeURIComponent(hour)}&min=${encodeURIComponent(
-      min,
-    )}&tz=${encodeURIComponent(tz)}&lang=${encodeURIComponent(
-      lang,
-    )}&name=${encodeURIComponent(name)}&birthPlace=${encodeURIComponent(
-      birthPlace,
-    )}`,
+    `${BASE_URL}v1/kundali/basic-details` +
+    `?dob=${encodeURIComponent(dob)}` +
+    `&tob=${encodeURIComponent(tob)}` +
+    `&tz=${encodeURIComponent(tz)}` +
+    `&lang=${encodeURIComponent(lang)}` +
+    `&name=${encodeURIComponent(name)}` +
+    `&birthPlace=${encodeURIComponent(birthPlace)}`,
 
   KUNDLI_DETAILS: ({
-    day,
-    month,
-    year,
-    hour,
-    min,
+    dob, // "15-07-2001"
+    tob, // "23:40"
     tz,
     lang = "en",
     name,
     birthPlace,
   }) =>
-    `${BASE_URL}/api/kundli/details?day=${encodeURIComponent(
-      day,
-    )}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(
-      year,
-    )}&hour=${encodeURIComponent(hour)}&min=${encodeURIComponent(
-      min,
-    )}&tz=${encodeURIComponent(tz)}&lang=${encodeURIComponent(
-      lang,
-    )}&name=${encodeURIComponent(name)}&birthPlace=${encodeURIComponent(
-      birthPlace,
-    )}`,
+    `${BASE_URL}v1/kundali/d1-chart` +
+    `?dob=${encodeURIComponent(dob)}` +
+    `&tob=${encodeURIComponent(tob)}` +
+    `&tz=${encodeURIComponent(tz)}` +
+    `&lang=${encodeURIComponent(lang)}` +
+    `&name=${encodeURIComponent(name)}` +
+    `&birthPlace=${encodeURIComponent(birthPlace)}`,
 
   KP_DETAILS: ({ dob, tob, tz, birthPlace }) =>
-    `${BASE_URL}/api/kp-details?dob=${encodeURIComponent(
+    `${BASE_URL}v1/kundali/kp?dob=${encodeURIComponent(
       dob,
     )}&tob=${encodeURIComponent(tob)}&tz=${encodeURIComponent(
       tz,
     )}&birthPlace=${encodeURIComponent(birthPlace)}`,
 
   ASHTAKVARGA_CHARTS: ({ dob, tob, birthPlace, tz, style = "north" }) =>
-    `${BASE_URL}/api/ashtakvarga-charts?dob=${encodeURIComponent(
+    `${BASE_URL}v1/kundali/ashtakavarga?dob=${encodeURIComponent(
       dob,
     )}&tob=${encodeURIComponent(tob)}&birthPlace=${encodeURIComponent(
       birthPlace,
     )}&tz=${encodeURIComponent(tz)}&style=${encodeURIComponent(style)}`,
 
   CHARTS: ({ dob, tob, tz, lang = "en", birthPlace, div, style = "north" }) =>
-    `${BASE_URL}/api/charts?dob=${encodeURIComponent(
+    `${BASE_URL}v1/kundali/all-charts?dob=${encodeURIComponent(
       dob,
     )}&tob=${encodeURIComponent(tob)}&tz=${encodeURIComponent(
       tz,
@@ -143,25 +132,22 @@ const API = {
       birthPlace,
     )}&div=${encodeURIComponent(div)}&style=${encodeURIComponent(style)}`,
 
-  DASHA: ({ day, month, year, hour, min, tz, lang = "en", name, location }) =>
-    `${BASE_URL}/api/dasha?day=${encodeURIComponent(
-      day,
-    )}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(
-      year,
-    )}&hour=${encodeURIComponent(hour)}&min=${encodeURIComponent(
-      min,
-    )}&tz=${encodeURIComponent(tz)}&lang=${encodeURIComponent(
-      lang,
-    )}&name=${encodeURIComponent(name)}&location=${encodeURIComponent(
-      location,
-    )}`,
+  DASHA: ({ dob, tob, tz, lang = "en", name, birthPlace }) =>
+    `${BASE_URL}v1/kundali/dashas` +
+    `?dob=${encodeURIComponent(dob)}` +
+    `&tob=${encodeURIComponent(tob)}` +
+    `&tz=${encodeURIComponent(tz)}` +
+    `&lang=${encodeURIComponent(lang)}` +
+    `&name=${encodeURIComponent(name)}` +
+    `&birthPlace=${encodeURIComponent(birthPlace)}`,
 
-  ASCENDANT_REPORT: ({ dob, tob, birthPlace, tz, lang = "en" }) =>
-    `${BASE_URL}/api/ascendant-report?dob=${encodeURIComponent(
-      dob,
-    )}&tob=${encodeURIComponent(tob)}&birthPlace=${encodeURIComponent(
-      birthPlace,
-    )}&tz=${encodeURIComponent(tz)}&lang=${encodeURIComponent(lang)}`,
+  ASCENDANT_REPORT: ({ dob, tob, birthPlace, tz, name }) =>
+    `${BASE_URL}v1/kundali/free-report` +
+    `?dob=${encodeURIComponent(dob)}` +
+    `&tob=${encodeURIComponent(tob)}` +
+    `&birthPlace=${encodeURIComponent(birthPlace)}` +
+    `&tz=${encodeURIComponent(tz)}` +
+    `&name=${encodeURIComponent(name)}`,
 
   MONTHLY_CHOGHADIYA: ({ location, month }) =>
     `${BASE_URL}/api/monthly-choghadiya?location=${encodeURIComponent(
@@ -177,26 +163,30 @@ const API = {
       birthplace,
     )}`,
 
-  CHOGHADIYA: ({ location, date }) =>
-    `${BASE_URL}/api/choghadiya?location=${encodeURIComponent(
+  CHOGHADIYA: ({ location, date, lang = "en" }) =>
+    `${BASE_URL}v1/panchang/choghadiya?location=${encodeURIComponent(
       location,
-    )}&date=${encodeURIComponent(date)}`,
+    )}&date=${encodeURIComponent(date)}&lang=${encodeURIComponent(lang)}`,
+
   FULL_KUNDLI: ({
-    day,
-    month,
-    year,
-    hour,
-    min,
+    dob, // "20-07-1973"
+    tob, // "23:40"
     tz,
-    lang,
+    lang = "en",
     name,
     birthPlace,
     div,
     style,
   }) =>
-    `${BASE_URL}/api/full-kundli?day=${day}&month=${month}&year=${year}&hour=${hour}&min=${min}&tz=${tz}&lang=${lang}&name=${encodeURIComponent(
-      name,
-    )}&birthPlace=${encodeURIComponent(birthPlace)}&div=${div}&style=${style}`,
+    `${BASE_URL}v1/kundali/full` +
+    `?dob=${encodeURIComponent(dob)}` +
+    `&tob=${encodeURIComponent(tob)}` +
+    `&tz=${encodeURIComponent(tz)}` +
+    `&lang=${encodeURIComponent(lang)}` +
+    `&name=${encodeURIComponent(name)}` +
+    `&birthPlace=${encodeURIComponent(birthPlace)}` +
+    `&div=${encodeURIComponent(div)}` +
+    `&style=${encodeURIComponent(style)}`,
 
   DOSHA: ({ dob, tob, birthPlace, tz, lang = "en" }) =>
     `${BASE_URL}/api/dosha?dob=${encodeURIComponent(
@@ -238,5 +228,26 @@ const API = {
     )}&birthPlace=${encodeURIComponent(
       birthPlace,
     )}&transitPlace=${encodeURIComponent(transitPlace)}`,
+  TAROT_SESSION: () => `${BASE_URL}v1/tarot/session`,
+
+  TAROT_REVEAL: ({ cardName, direction = "upright", lang = "en" }) =>
+    `${BASE_URL}v1/tarot/reveal` +
+    `?cardName=${encodeURIComponent(cardName)}` +
+    `&direction=${encodeURIComponent(direction)}` +
+    `&lang=${encodeURIComponent(lang)}`,
+
+  TAROT_ONE_CARD: () => `${BASE_URL}v1/tarot/quick/one-card`,
+  TAROT_THREE_CARD: () => `${BASE_URL}v1/tarot/quick/three-card`,
+  FULL_NUMEROLOGY: ({ name, dob, tob, tz, birthplace, lang = "en" }) =>
+    `${BASE_URL}v1/numero/full` +
+    `?name=${encodeURIComponent(name)}` +
+    `&dob=${encodeURIComponent(dob)}` +
+    `&tob=${encodeURIComponent(tob)}` +
+    `&tz=${encodeURIComponent(tz)}` +
+    `&birthPlace=${encodeURIComponent(birthplace)}` + 
+    `&lang=${encodeURIComponent(lang)}`,
+
+  LAAL_KITAAB: ({ day, month, year, hour, min, location, tzone }) =>
+    `${BASE_URL}/api/lk/laalkitab-report?day=${encodeURIComponent(day)}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}&hour=${encodeURIComponent(hour)}&min=${encodeURIComponent(min)}&location=${encodeURIComponent(location)}&tzone=${encodeURIComponent(tzone)}`,
 };
 export default API;

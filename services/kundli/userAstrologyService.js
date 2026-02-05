@@ -213,7 +213,7 @@ const updateUserAstrologyWithKundli = async (userId, kundliData, isQuery) => {
   }
 
   const { basicDetails, panchangDetails, avakhadaDetails } = kundliData.data;
-
+  // console.log("b", basicDetails);
   const updateFields = {};
 
   // Map response keys to model fields
@@ -221,7 +221,7 @@ const updateUserAstrologyWithKundli = async (userId, kundliData, isQuery) => {
     if (basicDetails.sunSign) updateFields.sunSign = basicDetails.sunSign;
     if (basicDetails.ascendantSign)
       updateFields.ascendant = basicDetails.ascendantSign;
-    if (basicDetails.rasi) updateFields.rasi = basicDetails.rasi;
+    if (basicDetails.Moon_Sign) updateFields.rasi = basicDetails.Moon_Sign;
     if (basicDetails.rasi_lord) updateFields.rasiLord = basicDetails.rasi_lord;
   }
 

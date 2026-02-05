@@ -10,7 +10,7 @@ const paymentRoutes = require("./paymentRoutes");
 const notificationRoutes = require("./notificationRoutes");
 const publicRoutes = require("./publicRoutes");
 const authController = require("../controller/authController");
-const ksRoutes = require("./ksRoutes");
+const ksRoutes = require("./ksRoute");
 
 router.use("/auth", authRoutes);
 router.use("/admin", adminRoutes);

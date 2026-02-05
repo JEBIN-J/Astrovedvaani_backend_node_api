@@ -4,17 +4,17 @@ const userKundliService = require("../../services/kundli/userKundliService");
 const { default: API } = require("../../services/kundli/api");
 const { default: axios } = require("axios");
 const getMatchMaking = asyncHandler(async (req, res) => {
-  const userId = req.user?._id || null; // FIXED (safe access)
+  const userId = req.user?._id || null;
   const { partnerId, ...directParams } = req.query;
 
   let matchData;
 
-  //  Token user + partnerId → User DB-based matchmaking
+  // ✅ Token user + partnerId → User DB-based matchmaking
   if (userId && partnerId) {
     matchData = await userKundliService.getMatchMakingData(userId, partnerId);
   }
 
-  //  Direct params matchmaking (no token needed)
+  // ✅ Direct params matchmaking (no token needed)
   else if (Object.keys(directParams).length > 0) {
     const requiredParams = [
       "boy_dob",
@@ -29,18 +29,23 @@ const getMatchMaking = asyncHandler(async (req, res) => {
     ];
 
     const missingParams = requiredParams.filter((p) => !(p in directParams));
-    if (missingParams.length > 0) {
-      throw new BadRequestError(
-        `Missing required parameters: ${missingParams.join(", ")}`,
-      );
-    }
 
-    // Call 3rd-party matchmaking API
-    const response = await axios.get(API.MATCH_MAKING(directParams));
+    // if (missingParams.length > 0) {
+    //   throw new BadRequestError(
+    //     `Missing required parameters: ${missingParams.join(", ")}`,
+    //   );
+    // }
+
+    // ✅ ONLY CHANGE: API KEY HEADER ADDED
+    const response = await axios.get(API.MATCH_MAKING(directParams), {
+      headers: getSaasHeaders(),
+      timeout: 15000,
+    });
+
     matchData = response.data;
   }
 
-  //  Neither token nor params provided
+  // ❌ Neither token nor params provided
   else {
     throw new BadRequestError(
       "Either provide logged-in user & partnerId OR all direct parameters",

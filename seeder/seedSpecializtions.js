@@ -45,11 +45,8 @@ const seedSpecializations = async () => {
       } else {
         // UPDATE related_to if changed
         let updated = false;
-
-        if (exists.related_to !== item.related_to) {
           exists.related_to = item.related_to;
           updated = true;
-        }
 
         if (!exists.isActive) {
           exists.isActive = true;

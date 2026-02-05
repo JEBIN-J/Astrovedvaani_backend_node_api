@@ -8,7 +8,9 @@ const horosopeController = require("../controller/kundliSection/horoscopeControl
 const kundliController = require("../controller/kundliSection/kundliController");
 const transitDoshaController = require("../controller/kundliSection/transitDoshaController");
 const authKundliMiddleware = require("../middlewares/authKundliMiddleware");
-const tarotController = require("../controller/kundliSection/taratController");
+const tarotController = require("../controller/kundliSection/tarotController");
+const { auth } = require("firebase-admin");
+const laalKitaabController = require("../controller/kundliSection/laalKitaabController");
 router.post(
   "/profile/add",
   authMiddleware,
@@ -105,7 +107,7 @@ router.get(
 router.get("/choghadiya", authMiddleware, kundliController.getChoghadiya);
 router.get(
   "/full-numerology",
-  authMiddleware,
+  authKundliMiddleware,
   kundliController.getFullNumerology,
 );
 router.get(
@@ -129,6 +131,14 @@ router.get(
   authMiddleware,
   transitDoshaController.getTransitPlanets,
 );
+
 router.get("/session", authMiddleware, tarotController.createTarotSession);
-router.get("/reveal", authMiddleware, tarotController.revealTarotCard);
+router.post("/reveal", authMiddleware, tarotController.revealTarotCard);
+router.get("/tarot/one-card", authMiddleware, tarotController.oneCardTarot);
+router.get("/tarot/three-card", authMiddleware, tarotController.threeCardTarot);
+
+router.get("/search-location", kundliController.searchLocation);
+router.get("/search-coordinates", kundliController.searchCoordinates);
+router.get("/suggestions", kundliController.getSuggestions);
+router.get("/laal-kitaab", authMiddleware, laalKitaabController.getLaalKitaab);
 module.exports = router;

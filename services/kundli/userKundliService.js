@@ -6,7 +6,7 @@ const CacheService = require("../../utils/redis/cacheService");
 const API = require("./api").default;
 
 const TTL_30_DAYS = 60 * 60 * 24 * 30;
-
+const { getSaasHeaders } = require("../../utils/apiHeader");
 const generateCacheKey = (id1, id2) => {
   const sortedIds = [id1.toString(), id2.toString()].sort();
   return `matchmaking:${sortedIds[0]}:${sortedIds[1]}`;
@@ -65,8 +65,7 @@ const getMatchMakingData = async (id1, id2) => {
     if (!user1 || !user2) {
       throw new NotFoundError("User astrology data not found");
     }
-    // logger.info(`User1 data: ${JSON.stringify(user1)}`);
-    // logger.info(`User2 data: ${JSON.stringify(user2)}`);
+
     validateUserData(user1, "Your:");
     validateUserData(user2, "Partner:");
     const cacheKey = generateCacheKey(id1, id2);
@@ -113,7 +112,11 @@ const getMatchMakingData = async (id1, id2) => {
     logger.info(
       `Calling MatchMaking API with params: ${JSON.stringify(params)}`,
     );
-    const response = await axios.get(API.MATCH_MAKING(params));
+    const response = await axios.get(API.MATCH_MAKING(params), {
+      headers: getSaasHeaders(),
+      timeout: 15000,
+    });
+
     // logger.info(`MatchMaking API response received, status: ${response.status}`);
     if (response?.data?.data) {
       response.data.data.boy = {

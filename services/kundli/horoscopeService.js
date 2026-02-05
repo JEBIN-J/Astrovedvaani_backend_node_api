@@ -7,16 +7,34 @@ const API = require("./api").default;
 const kundliService = require("./kundliService");
 const kundliImage = require("../../models/kundliImage");
 const HOROSCOPE_CACHE_TTL = 24 * 60 * 60;
-
+const { getSaasHeaders } = require("../../utils/apiHeader");
 const formatDateForApi = (dateStr) => {
   if (!dateStr) return "";
-  const parts = dateStr.split("/");
-  if (parts.length === 3) return dateStr;
-  const dateObj = new Date(dateStr);
-  const day = String(dateObj.getDate()).padStart(2, "0");
-  const month = String(dateObj.getMonth() + 1).padStart(2, "0");
-  const year = dateObj.getFullYear();
-  return `${day}/${month}/${year}`;
+
+  // ✅ If already a Date object
+  if (dateStr instanceof Date) {
+    const day = String(dateStr.getDate()).padStart(2, "0");
+    const month = String(dateStr.getMonth() + 1).padStart(2, "0");
+    const year = dateStr.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  // ✅ If string like "DD/MM/YYYY"
+  if (typeof dateStr === "string") {
+    const parts = dateStr.split("/");
+    if (parts.length === 3) return dateStr;
+
+    // Try parsing string date
+    const dateObj = new Date(dateStr);
+    if (!isNaN(dateObj)) {
+      const day = String(dateObj.getDate()).padStart(2, "0");
+      const month = String(dateObj.getMonth() + 1).padStart(2, "0");
+      const year = dateObj.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+  }
+
+  throw new Error("Invalid date format");
 };
 
 const getHoroscopeData = async ({
@@ -44,24 +62,25 @@ const getHoroscopeData = async ({
       profile = await UserAstrology.findById(userId);
     }
 
-    //  If zodiac is provided → skip profile requirement
     if (!profile && !zodiac) {
-      logger.error(`[Horoscope] No profile and no zodiac for userId=${userId}`);
       throw new Error("User astrology profile or zodiac is required.");
     }
 
-    //  If profile exists but rasi missing AND no zodiac → error
     if (profile && !profile.rasi && !zodiac) {
       throw new Error("Zodiac sign missing (rasi).");
     }
+
     const zodiacSign = zodiac
       ? zodiac.toLowerCase()
       : profile.rasi.toLowerCase();
 
-    const formattedDate = date ? formatDateForApi(date) : null;
+    // ✅ daily ke liye safe date
+    const formattedDate = date
+      ? formatDateForApi(date)
+      : formatDateForApi(new Date());
 
-    // ----------------- SELECT API BASED ON TYPE -----------------
-    let apiUrl = "";
+    // ----------------- SELECT API -----------------
+    let apiUrl;
     switch (type) {
       case "daily":
         apiUrl = API.DAILY_HOROSCOPE({
@@ -71,12 +90,15 @@ const getHoroscopeData = async ({
           type: "normal",
         });
         break;
+
       case "weekly":
         apiUrl = API.WEEKLY_HOROSCOPE({ zodiac: zodiacSign, week, lang });
         break;
+
       case "monthly":
         apiUrl = API.MONTHLY_HOROSCOPE({ zodiac: zodiacSign, lang });
         break;
+
       case "yearly":
         apiUrl = API.YEARLY_HOROSCOPE({
           zodiac: zodiacSign,
@@ -84,8 +106,8 @@ const getHoroscopeData = async ({
           lang,
         });
         break;
+
       default:
-        logger.error(`[Horoscope] Unsupported type: ${type}`);
         throw new Error(`Unsupported horoscope type: ${type}`);
     }
 
@@ -94,32 +116,32 @@ const getHoroscopeData = async ({
     // ----------------- HIT EXTERNAL API -----------------
     let response;
     try {
-      response = await axios.get(apiUrl);
+      response = await axios.get(apiUrl, {
+        headers: getSaasHeaders(),
+        timeout: 15000,
+      });
     } catch (err) {
       logger.error(
-        `[Horoscope] API request failed: ${err.message}`,
-        err.response?.data || {},
+        `[Horoscope] API request failed`,
+        err.response?.data || err.message,
       );
-      throw new Error(`Failed to fetch horoscope data: ${err.message}`);
+      throw new Error("Failed to fetch horoscope data");
     }
 
-    // ----------------- FETCH KUNDLI IMAGE DIRECTLY NO CACHE -----------------
+    // ----------------- FETCH ZODIAC IMAGE -----------------
     const kundliImages = await kundliImage.find().lean();
     const matchedKundli = kundliImages.find(
       (k) => k.name.toLowerCase() === zodiacSign,
     );
-    const zodiacImage = matchedKundli ? matchedKundli.image : null;
 
     // ----------------- FINAL RESPONSE -----------------
-    const finalData = {
-      success: response.data.success,
-      type: response.data.type,
-      zodiac: response.data.zodiac,
-      zodiacImage,
-      data: response.data.data,
+    return {
+      success: response.data?.success ?? true,
+      type,
+      zodiac: zodiacSign,
+      zodiacImage: matchedKundli ? matchedKundli.image : null,
+      data: response.data?.data || response.data,
     };
-
-    return finalData;
   } catch (err) {
     logger.error(`[Horoscope] Error for userId=${userId}: ${err.message}`);
     throw err;

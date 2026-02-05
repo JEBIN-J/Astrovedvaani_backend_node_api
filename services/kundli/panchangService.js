@@ -6,7 +6,7 @@ const API = require("./api").default;
 const moment = require("moment-timezone");
 const TithiSchedule = require("../../models/tithiSchedule");
 const CacheService = require("../../utils/redis/cacheService");
-
+const { getSaasHeaders } = require("../../utils/apiHeader");
 const formatDateDDMMYYYY = (date) => {
   logger.info(`Raw input date: ${date}`);
   if (!date) {
@@ -73,30 +73,50 @@ const formatDateDDMMYYYY = (date) => {
 //     throw error;
 //   }
 // };
-
-const getPanchangData = async ({ userId, date, location, tz }) => {
+const getPanchangData = async ({ userId, date, location, tz, lang = "en" }) => {
   logger.info(
-    `getPanchangData called with: date=${date}, location=${location}, tz=${tz}`,
+    `getPanchangData called with: date=${date}, location=${location}, tz=${tz}, lang=${lang}`,
   );
 
   const formattedDate = formatDateDDMMYYYY(date);
   const normalizedLocation = location.trim().toLowerCase();
 
+  // ✅ FIXED CACHE KEY
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
-    `panchang-${normalizedLocation}-${formattedDate}`,
+    `panchang-${normalizedLocation}-${formattedDate}-${tz}-${lang}`,
     userId || "guest",
   );
 
   const cachedData = await CacheService.get(cacheKey);
 
   const fetchAndCache = async () => {
-    const apiUrl = API.PANCHANG({ date: formattedDate, location, tz });
-    const apiUrlChogadiya = API.CHOGHADIYA({ date: formattedDate, location });
+    const apiUrl = API.PANCHANG({
+      date: formattedDate,
+      location,
+      tz,
+      lang,
+    });
+    console.log("Panchang API URL:", apiUrl);
+
+    const apiUrlChogadiya = API.CHOGHADIYA({
+      date: formattedDate,
+      location,
+      lang,
+    });
+
+    logger.info(`Fetching Panchang API: ${apiUrl}`);
+    logger.info(`Fetching Chogadiya API: ${apiUrlChogadiya}`);
 
     const [panchangResponse, chogadiyaResponse] = await Promise.all([
-      axios.get(apiUrl),
-      axios.get(apiUrlChogadiya),
+      axios.get(apiUrl, {
+        headers: getSaasHeaders(),
+        timeout: 15000,
+      }),
+      axios.get(apiUrlChogadiya, {
+        headers: getSaasHeaders(),
+        timeout: 15000,
+      }),
     ]);
 
     const responseData = {
@@ -105,15 +125,20 @@ const getPanchangData = async ({ userId, date, location, tz }) => {
     };
 
     await CacheService.set(cacheKey, responseData, 2 * 60 * 60);
+    logger.info(`Cached Panchang for key=${cacheKey}`);
+
     return responseData;
   };
 
   if (cachedData && cachedData.sunrise && cachedData.sunset) {
-    fetchAndCache().catch(() => {});
+    logger.info(`Returning Panchang from cache, refreshing in background`);
+    fetchAndCache().catch((err) =>
+      logger.error(`Background refresh failed: ${err.message}`),
+    );
     return cachedData;
   }
 
-  return await fetchAndCache();
+  return fetchAndCache();
 };
 
 const getCityFromCoords = async (lat, lon) => {
