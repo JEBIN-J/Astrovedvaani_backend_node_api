@@ -18,7 +18,6 @@ exports.createCategory = async (req, res) => {
 
 exports.updateCategory = async (req, res) => {
   try {
-    // const { id, ...data } = req.body;
     const { id } = req.query;
 
     const category = id
@@ -33,25 +32,33 @@ exports.updateCategory = async (req, res) => {
 
 exports.getCategories = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search } = req.query;
+    const { page = 1, limit = 10, search, related_to } = req.query;
+
     const pageInt = parseInt(page, 10);
     const limitInt = parseInt(limit, 10);
 
     const filter = {};
+
     if (search) {
       filter.name = { $regex: search, $options: "i" };
+    }
+
+    // ✅ RELATED_TO FILTER
+    if (related_to !== undefined) {
+      filter.related_to = Number(related_to);
     }
 
     const { categories, total } = await categoryService.fetchCategories({
       page: pageInt,
       limit: limitInt,
-      filter, // pass the filter to the service
+      filter,
     });
 
     const formattedCategories = categories.map((cat) => ({
       _id: cat._id,
       id: cat._id.toString(),
       name: cat.name,
+      related_to: cat.related_to,
     }));
 
     res.status(200).json({
@@ -67,7 +74,7 @@ exports.getCategories = async (req, res) => {
     console.error("[CategoryController] Error:", error);
     res.status(500).json({
       error: "SERVER_ERROR",
-      message: "Unable to fetch categories at this time",
+      message: "Unable to fetch categories",
     });
   }
 };
@@ -78,16 +85,15 @@ exports.getCategory = async (req, res) => {
     if (!category)
       return res.status(404).json({ message: "Category not found" });
 
-    // ✅ Fetch all published blogs under this category
     const blogs = await Blog.find({
       category: category._id,
       status: "published",
+      related_to: category.related_to, // ✅ Match related type
     })
       .select("title slug thumbnail coverImage excerpt createdAt")
       .sort({ createdAt: -1 })
       .lean();
 
-    // ✅ Combine both
     res.status(200).json({
       success: true,
       category,

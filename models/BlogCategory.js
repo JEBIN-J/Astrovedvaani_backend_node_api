@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
+const Enums = require('../utils/constants');
 
 const blogCategorySchema = new Schema({
   name: {
@@ -19,8 +20,16 @@ const blogCategorySchema = new Schema({
   description: {
     type: String,
     maxlength: [200, 'Description cannot exceed 200 characters']
-  }
+  },
+  related_to: {
+      type: Number,
+      enum: Object.values(Enums.GENERAL.CATEGORY.RELATED_TO),
+      default: Enums.GENERAL.CATEGORY.RELATED_TO.BLOG,
+    },
 }, { timestamps: true });
+
+blogCategorySchema.index({ related_to: 1 });
+
 
 // Generate slug before validation (instead of save)
 blogCategorySchema.pre('validate', function (next) {

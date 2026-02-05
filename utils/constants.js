@@ -360,6 +360,14 @@ const Enums = {
     ASTROLOGER_LISTING_PAGE: 8200,
     BLOG_PAGE: 8300,
   },
+  GENERAL: {
+    CATEGORY: {
+      RELATED_TO: {
+        BLOG: 9000,
+        NEWS: 9100,
+      },
+    },
+  },
 };
 
 Object.freeze(Enums);

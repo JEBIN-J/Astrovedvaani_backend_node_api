@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
+const Enums = require("../utils/constants");
 
 const blogSchema = new Schema(
   {
@@ -36,6 +37,11 @@ const blogSchema = new Schema(
       ref: "BlogCategory",
       required: true,
     },
+    related_to: {
+      type: Number,
+      enum: Object.values(Enums.GENERAL.CATEGORY.RELATED_TO),
+      default: Enums.GENERAL.CATEGORY.RELATED_TO.BLOG,
+    },
     status: {
       type: String,
       enum: ["draft", "published"],
@@ -64,6 +70,9 @@ const blogSchema = new Schema(
   },
   { timestamps: true },
 );
+
+blogSchema.index({ related_to: 1, status: 1 });
+
 
 // Generate slug and excerpt before validation
 blogSchema.pre("validate", function (next) {

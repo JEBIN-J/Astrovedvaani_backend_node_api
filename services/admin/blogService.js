@@ -17,7 +17,7 @@ exports.getAllBlogs = async ({ page = 1, limit = 10, filter = {} }) => {
   const [blogs, total] = await Promise.all([
     Blog.find(filter)
       .select(
-        "title slug coverImage thumbnailImage content views status createdAt category featured",
+        "title slug coverImage thumbnailImage content views status createdAt category featured related_to"
       )
       .populate("category", "_id name")
       .skip(skip)
@@ -32,13 +32,9 @@ exports.getAllBlogs = async ({ page = 1, limit = 10, filter = {} }) => {
 exports.getBlogById = async (id, slug) => {
   let query = {};
 
-  if (id) {
-    query._id = id;
-  } else if (slug) {
-    query.slug = slug;
-  } else {
-    throw new Error("Blog ID or slug is required");
-  }
+  if (id) query._id = id;
+  else if (slug) query.slug = slug;
+  else throw new Error("Blog ID or slug is required");
 
   return await Blog.findOne(query)
     .populate("author", "name email")
