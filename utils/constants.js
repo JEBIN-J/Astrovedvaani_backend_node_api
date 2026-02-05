@@ -305,6 +305,14 @@ const Enums = {
     },
   },
 
+
+  SPECIALIZATION: {
+    RELATED_TO: {
+      DOMAIN: 6000,
+      EXPERTISE: 6100,
+    },
+  },
+
   STATIC_PAGE: {
     TYPE: {
       PRIVACY_POLICY: 6000,

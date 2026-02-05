@@ -82,33 +82,38 @@ async function getAllSpecializations({
   page = 1,
   limit = 50,
   isActive,
+  related_to,
   search,
 } = {}) {
   const cacheKey =
     SPECIALIZATION_CACHE +
-    (isActive !== undefined ? `:isActive:${isActive}` : "");
-  let cached = await CacheService.get(cacheKey);
+    (isActive !== undefined ? `:active_${isActive}` : "") +
+    (related_to !== undefined ? `:related_${related_to}` : "");
 
+  let cached = await CacheService.get(cacheKey);
   let allSpecializations;
+
   if (cached) {
-    allSpecializations = cached.data; // full list from cache
+    allSpecializations = cached.data;
   } else {
     const filter = {};
     if (isActive !== undefined) filter.isActive = isActive;
+    if (related_to !== undefined) filter.related_to = related_to;
 
     allSpecializations = await Specialization.find(filter)
       .sort({ name: 1 })
       .lean();
+
     await CacheService.set(cacheKey, { data: allSpecializations });
   }
 
-  // --- apply search filter in memory ---
   if (search) {
     const regex = new RegExp(search, "i");
-    allSpecializations = allSpecializations.filter((s) => regex.test(s.name));
+    allSpecializations = allSpecializations.filter((s) =>
+      regex.test(s.name),
+    );
   }
 
-  // paginate in memory
   const totalDocs = allSpecializations.length;
   const start = (page - 1) * limit;
   const paginatedData = allSpecializations.slice(start, start + Number(limit));
@@ -120,7 +125,6 @@ async function getAllSpecializations({
 }
 
 async function createSpecialization(data) {
-  // data.name = data.name.toUpperCase();
   const existing = await Specialization.findOne({ name: data.name });
   if (existing) throw new ConflictError("Specialization already exists");
 
@@ -135,6 +139,7 @@ async function updateSpecialization(id, data) {
 
   spec.name = data.name || spec.name;
   spec.description = data.description ?? spec.description;
+  if (data.related_to !== undefined) spec.related_to = data.related_to;
   if (data.isActive !== undefined) spec.isActive = data.isActive;
 
   await spec.save();
