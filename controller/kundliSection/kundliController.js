@@ -1,5 +1,6 @@
 const { BadRequestError } = require("../../errors");
 const asyncHandler = require("../../middlewares/asyncHandler");
+const UserAstrology = require("../../models/UserAstrology");
 const kundliService = require("../../services/kundli/kundliService");
 const { getPanchangData } = require("../../services/kundli/panchangService");
 const logger = require("../../utils/logger");
@@ -135,19 +136,20 @@ const getDasha = asyncHandler(async (req, res) => {
 });
 
 const getAscendantReport = asyncHandler(async (req, res) => {
-  // 🔥 id based support
+ 
   const idParam = req.query.id?.trim();
   const isQuery = Boolean(idParam);
 
-  const userId = isQuery ? idParam : req.user?._id;
+  const userId = isQuery ? idParam : req.user?._id || null;
   // if (!userId) throw new BadRequestError("User ID is missing");
 
   const lang = req.query.lang || "en";
   const dob = req.query.dob;
   const tob = req.query.tob;
   const tz = req.query.tz;
-  const birthPlace = req.query.birthPlace;
   const name = req.query.name;
+  const birthPlace = req.query.birthPlace;
+
   logger.info(`[Ascendant Controller] userId=${userId}, isQuery=${isQuery}`);
 
   const reportData = await kundliService.getAscendantReport(
@@ -157,12 +159,13 @@ const getAscendantReport = asyncHandler(async (req, res) => {
     tob,
     tz,
     birthPlace,
+    isQuery, 
     name,
-    isQuery, // 🔑 id based flag
   );
 
   res.status(200).json(reportData);
 });
+
 const getMonthlyChoghadiya = asyncHandler(async (req, res) => {
   const id = req.query.id;
   const userId = id || req.user?._id;
@@ -185,7 +188,7 @@ const getFullNumerology = asyncHandler(async (req, res) => {
   const userId = id || req.user?._id;
   const isQuery = Boolean(id);
 
-  if (!userId) throw new BadRequestError("User ID is missing");
+  // if (!userId) throw new BadRequestError("User ID is missing");
 
   // Extract relevant query params (if user provided any)
   const { name, dob, tob, tz, birthplace } = req.query;

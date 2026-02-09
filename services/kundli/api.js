@@ -2,40 +2,45 @@ const BASE_URL = "https://astrologyapi.nexthikes.in/api/";
 
 const API = {
   LOCATION_SUGGESTIONS: (input) =>
-    `${BASE_URL}/location/suggestions?input=${encodeURIComponent(input)}`,
+    `${BASE_URL}location/suggestions?input=${encodeURIComponent(input)}`,
 
   LOCATION_BY_NAME: (query) =>
-    `${BASE_URL}/location/search-location?query=${encodeURIComponent(query)}`,
+    `${BASE_URL}location/allsuggestions?input=${encodeURIComponent(query)}`,
 
   LOCATION_BY_COORDINATES: (lat, lon) =>
-    `${BASE_URL}/location/search-coordinates?lat=${encodeURIComponent(
+    `${BASE_URL}location/search-coordinates?lat=${encodeURIComponent(
       lat,
     )}&lon=${encodeURIComponent(lon)}`,
 
   MATCH_MAKING: ({
+    boy_name,
+    girl_name,
+
     boy_dob,
     boy_tob,
     boy_tz,
     boy_birthPlace,
+
     girl_dob,
     girl_tob,
     girl_tz,
     girl_birthPlace,
+
     lang = "en",
   }) =>
-    `${BASE_URL}v1/match/gun-milan?boy_dob=${encodeURIComponent(
-      boy_dob,
-    )}&boy_tob=${encodeURIComponent(boy_tob)}&boy_tz=${encodeURIComponent(
-      boy_tz,
-    )}&boy_birthPlace=${encodeURIComponent(
-      boy_birthPlace,
-    )}&girl_dob=${encodeURIComponent(girl_dob)}&girl_tob=${encodeURIComponent(
-      girl_tob,
-    )}&girl_tz=${encodeURIComponent(
-      girl_tz,
-    )}&girl_birthPlace=${encodeURIComponent(
-      girl_birthPlace,
-    )}&lang=${encodeURIComponent(lang)}`,
+    `${BASE_URL}v1/match/gun-milan?` +
+    `boy_name=${encodeURIComponent(boy_name)}` +
+    `&boy_dob=${encodeURIComponent(boy_dob)}` +
+    `&boy_tob=${encodeURIComponent(boy_tob)}` +
+    `&boy_tz=${encodeURIComponent(boy_tz)}` +
+    `&boy_birthPlace=${encodeURIComponent(boy_birthPlace)}` +
+    `&girl_name=${encodeURIComponent(girl_name)}` +
+    `&girl_dob=${encodeURIComponent(girl_dob)}` +
+    `&girl_tob=${encodeURIComponent(girl_tob)}` +
+    `&girl_tz=${encodeURIComponent(girl_tz)}` +
+    `&girl_birthPlace=${encodeURIComponent(girl_birthPlace)}` +
+    `&lang=${encodeURIComponent(lang)}`,
+
   PANCHANG: ({ date, location, tz, lang = "en" }) =>
     `${BASE_URL}v1/panchang/daily?date=${encodeURIComponent(
       date,
@@ -244,10 +249,16 @@ const API = {
     `&dob=${encodeURIComponent(dob)}` +
     `&tob=${encodeURIComponent(tob)}` +
     `&tz=${encodeURIComponent(tz)}` +
-    `&birthPlace=${encodeURIComponent(birthplace)}` + 
+    `&birthPlace=${encodeURIComponent(birthplace)}` +
     `&lang=${encodeURIComponent(lang)}`,
 
-  LAAL_KITAAB: ({ day, month, year, hour, min, location, tzone }) =>
-    `${BASE_URL}/api/lk/laalkitab-report?day=${encodeURIComponent(day)}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}&hour=${encodeURIComponent(hour)}&min=${encodeURIComponent(min)}&location=${encodeURIComponent(location)}&tzone=${encodeURIComponent(tzone)}`,
+  LAAL_KITAAB: ({ name, dob, tob, birthPlace, tz, lang = "en" }) =>
+    `${BASE_URL}v1/kundali/lal-kitab` +
+    `?name=${encodeURIComponent(name)}` +
+    `&dob=${encodeURIComponent(dob)}` +
+    `&tob=${encodeURIComponent(tob)}` +
+    `&birthPlace=${encodeURIComponent(birthPlace)}` +
+    `&tz=${encodeURIComponent(tz)}` +
+    `&lang=${encodeURIComponent(lang)}`,
 };
 export default API;

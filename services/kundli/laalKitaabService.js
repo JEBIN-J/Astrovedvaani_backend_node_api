@@ -3,6 +3,7 @@ const logger = require("../../utils/logger");
 const CacheService = require("../../utils/redis/cacheService");
 const API = require("./api").default;
 const UserAstrology = require("../../models/UserAstrology");
+const { getSaasHeaders } = require("../../utils/apiHeader");
 
 const getLaalKitaabData = async ({
   userId,
@@ -85,16 +86,22 @@ const getLaalKitaabData = async ({
   const cachedData = await CacheService.get(cacheKey);
 
   const fetchAndCache = async () => {
+    // Convert to external format
+    const dob = `${day}-${month}-${year}`; // DD-MM-YYYY
+    const tob = `${hour}:${min}`; // HH:mm
+
     const apiUrl = API.LAAL_KITAAB({
-      day,
-      month,
-      year,
-      hour,
-      min,
-      location,
-      tzone,
+      name: profile?.name || "User",
+      dob,
+      tob,
+      birthPlace: location,
+      tz: tzone,
     });
-    const response = await axios.get(apiUrl);
+
+    const response = await axios.get(apiUrl, {
+      headers: getSaasHeaders(),
+      timeout: 15000,
+    });
     await CacheService.set(cacheKey, response.data, 2 * 60 * 60); // 2h cache
     return response.data;
   };

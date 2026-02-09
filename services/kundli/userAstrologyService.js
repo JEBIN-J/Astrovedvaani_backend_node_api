@@ -157,7 +157,6 @@ const getCitySuggestion = async (key) => {
       logger.warn(`No suggestions found for key="${key}"`);
       return { success: false, data: [] };
     }
-
     const suggestions = suggestionData.data || [];
     logger.info(`Found ${suggestions.length} suggestions for key="${key}"`);
     const detailedSuggestions = await Promise.all(
@@ -165,14 +164,19 @@ const getCitySuggestion = async (key) => {
         try {
           logger.info(`Fetching location details for address="${s.address}"`);
           const locRes = await axios.get(API.LOCATION_BY_NAME(s.address));
+
           const locData = locRes.data;
+
+          const location = locData.data?.[0];
+
           logger.info(
-            `Got location: lat=${locData.data?.lat}, lon=${locData.data?.lon} for "${s.address}"`,
+            `Got location: lat=${location?.lat}, lon=${location?.lon} for "${s.address}"`,
           );
+
           return {
-            address: locData.data?.address || s.address,
-            latitude: locData.data?.lat || null,
-            longitude: locData.data?.lon || null,
+            address: location?.address || s.address,
+            latitude: location?.lat || null,
+            longitude: location?.lon || null,
           };
         } catch (err) {
           logger.error(
@@ -213,7 +217,7 @@ const updateUserAstrologyWithKundli = async (userId, kundliData, isQuery) => {
   }
 
   const { basicDetails, panchangDetails, avakhadaDetails } = kundliData.data;
-  // console.log("b", basicDetails);
+
   const updateFields = {};
 
   // Map response keys to model fields
@@ -259,6 +263,7 @@ const updateUserAstrologyWithKundli = async (userId, kundliData, isQuery) => {
   // Update profile
   Object.assign(profile, updateFields);
   await profile.save();
+
   logger.info(
     `User astrology updated successfully for userId=${userId}`,
     updateFields,

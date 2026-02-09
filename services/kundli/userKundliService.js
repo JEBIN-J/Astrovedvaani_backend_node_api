@@ -98,17 +98,30 @@ const getMatchMakingData = async (id1, id2) => {
       girl = user2;
     }
     logger.info(`boy name ---${boy.name} and girl name : ---${girl.name}`);
+    const cleanDOB = (date) => formatDateDDMMYYYY(date).replace(/\//g, "-");
+
+    const cleanLang = (lang) => (lang || "en").trim(); // remove space
+
     const params = {
-      boy_dob: formatDateDDMMYYYY(boy.birthDate),
+      // ✅ Names
+      boy_name: boy.name.trim(),
+      girl_name: girl.name.trim(),
+
+      // ✅ Date format
+      boy_dob: cleanDOB(boy.birthDate),
       boy_tob: formatTimeHHMM(boy.birthTime),
-      boy_tz: typeof boy.timezone === "number" ? boy.timezone : 5.5,
-      boy_birthPlace: boy.birthPlace,
-      girl_dob: formatDateDDMMYYYY(girl.birthDate),
+      boy_tz: boy.timezone || 5.5,
+      boy_birthPlace: boy.birthPlace.trim(),
+
+      girl_dob: cleanDOB(girl.birthDate),
       girl_tob: formatTimeHHMM(girl.birthTime),
-      girl_tz: typeof girl.timezone === "number" ? girl.timezone : 5.5,
-      girl_birthPlace: girl.birthPlace,
-      lang: boy.preferredLanguage || "en",
+      girl_tz: girl.timezone || 5.5,
+      girl_birthPlace: girl.birthPlace.trim(),
+
+      // ✅ No space
+      lang: cleanLang(boy.preferredLanguage),
     };
+
     logger.info(
       `Calling MatchMaking API with params: ${JSON.stringify(params)}`,
     );

@@ -3,7 +3,10 @@ const logger = require("../../utils/logger");
 const UserAstrology = require("../../models/UserAstrology");
 const { updateUserAstrologyWithKundli } = require("./userAstrologyService");
 const CacheService = require("../../utils/redis/cacheService");
+const { query } = require("express");
 const { BadRequestError } = require("../../errors");
+const User = require("../../models/User");
+const { getDosha, getTransitPlanets } = require("./transitDoshaService");
 const API = require("./api").default;
 const { fetchUserDetailsById } = require("../astrologer/userService");
 const { getSaasHeaders } = require("../../utils/apiHeader");
@@ -43,7 +46,9 @@ const getKundliData = async (userId, queryParams = {}, isRelative = false) => {
     CacheService.CACHE_PREFIXES.USER_DETAILS,
     "kundli-basic",
     profile._id.toString(),
-    JSON.stringify(queryParams),
+    profile.birthDate,
+    profile.birthTime,
+    profile.birthPlace,
   );
 
   const cachedData = await CacheService.get(cacheKey);
@@ -118,7 +123,6 @@ const getKundliData = async (userId, queryParams = {}, isRelative = false) => {
 
   return response.data;
 };
-
 const getKundliDetailsData = async (userId, isQuery, queryParams = {}) => {
   logger.info(`getKundliDetailsData called for userId=${userId}`);
 
@@ -605,8 +609,8 @@ const getDasha = async (
     logger.info(`Fetching Dasha data from API (query params): ${apiUrl}`);
 
     const response = await axios.get(apiUrl, {
-       headers: getSaasHeaders(),
-        timeout: 15000,
+      headers: getSaasHeaders(),
+      timeout: 15000,
     });
 
     return response.data;
@@ -684,110 +688,138 @@ const getAscendantReport = async (
   tob,
   tz,
   birthPlace,
-  name,
   isQuery,
+  name,
 ) => {
-  logger.info(
-    `getAscendantReport called for userId=${userId}, lang=${lang}, isQuery=${isQuery}`,
-  );
+  try {
+    logger.info(`Ascendant for user=${userId}`);
 
-  const cacheKey = CacheService.generateKey(
-    CacheService.CACHE_PREFIXES.USER_DETAILS,
-    `ascendant-report-${lang}`,
-    userId,
-  );
+    // ================= PROFILE =================
+    let profile;
 
-  const cachedData = await CacheService.get(cacheKey);
-  if (cachedData) {
-    logger.info(`Returning Ascendant Report from cache for userId=${userId}`);
-    return cachedData;
-  }
+    if (!isQuery) {
+      profile = await UserAstrology.findOne({
+        userId,
+        relationshipToOwner: "self",
+      });
+    } else {
+      profile = await UserAstrology.findById(userId);
+    }
 
-  // 🔥 Resolve profile: self OR relative
-  let profile;
-  if (!isQuery) {
-    profile = await UserAstrology.findOne({
+    // if (!profile) {
+    //   throw new Error("Astrology profile not found");
+    // }
+
+    // ================= HELPERS =================
+
+    // DD/MM/YYYY → DD-MM-YYYY
+    const formatDOB = (date) => {
+      if (!date) return null;
+
+      if (typeof date === "string" && date.includes("/")) {
+        const [d, m, y] = date.split("/");
+        return `${d.padStart(2, "0")}-${m.padStart(2, "0")}-${y}`;
+      }
+
+      const dt = new Date(date);
+
+      return `${String(dt.getDate()).padStart(2, "0")}-${String(
+        dt.getMonth() + 1,
+      ).padStart(2, "0")}-${dt.getFullYear()}`;
+    };
+
+    // HH:mm only
+    const formatTOB = (time) => {
+      if (!time) return null;
+
+      if (/^\d{1,2}:\d{2}$/.test(time)) {
+        const [h, m] = time.split(":");
+        return `${h.padStart(2, "0")}:${m}`;
+      }
+
+      if (/^\d{1,2}:\d{2}:\d{2}$/.test(time)) {
+        const [h, m] = time.split(":");
+        return `${h.padStart(2, "0")}:${m}`;
+      }
+
+      return null;
+    };
+
+    const getTZ = (date) => -new Date(date).getTimezoneOffset() / 60;
+
+    // ================= FINAL VALUES =================
+
+    const finalDOB = formatDOB(dob || profile.birthDate);
+
+    const finalTOB = formatTOB(tob || convertTo24Hour(profile.birthTime));
+
+    const finalTZ = tz || getTZ(profile.birthDate) || 5.5;
+
+    const finalPlace = birthPlace || profile.birthPlace?.trim();
+
+    const finalName = name || profile.name || "User";
+
+    // ================= VALIDATION =================
+
+    if (!finalDOB || !finalTOB || !finalPlace) {
+      throw new Error("Missing DOB / TOB / Place");
+    }
+
+    // ================= CACHE KEY (AFTER DATA READY) =================
+
+    const cacheKey = CacheService.generateKey(
+      CacheService.CACHE_PREFIXES.USER_DETAILS,
+      `ascendant-${lang}-${finalDOB}-${finalTOB}-${finalPlace}-${finalTZ}`,
       userId,
-      relationshipToOwner: "self",
+    );
+
+    // const cached = await CacheService.get(cacheKey);
+
+    // if (cached) {
+    //   logger.info("Ascendant returned from cache");
+    //   return cached;
+    // }
+
+    // ================= API =================
+
+    const apiUrl = API.ASCENDANT_REPORT({
+      dob: finalDOB,
+      tob: finalTOB,
+      birthPlace: finalPlace,
+      tz: finalTZ,
+      name: finalName,
     });
-  } else {
-    profile = await UserAstrology.findById(userId);
-  }
 
-  if (!profile) {
-    throw new Error("Astrology profile not found for user");
-  }
+    logger.info(`[Ascendant API] ${apiUrl}`);
 
-  // ---------------- Helpers ----------------
-  const formatDate = (date) => {
-    const d = new Date(date);
-    return `${String(d.getDate()).padStart(2, "0")}/${String(
-      d.getMonth() + 1,
-    ).padStart(2, "0")}/${d.getFullYear()}`;
-  };
+    const response = await axios.get(apiUrl, {
+      headers: {
+        "x-api-key": process.env.SAAS_API_KEY,
+        "Content-Type": "application/json",
+      },
+      timeout: 15000,
+    });
 
-  const cleanTOB = (tob) => {
-    if (!tob) return null;
+    // ================= UPDATE SELF =================
 
-    if (/^\d{1,2}:\d{1,2}:\d{1,2}$/.test(tob)) {
-      return tob.split(":").slice(0, 2).join(":");
+    // if (response.data?.success && !isQuery) {
+    //   await updateUserAstrologyWithKundli(userId, response.data);
+    // }
+    if (response.data?.success && userId && !isQuery) {
+      await updateUserAstrologyWithKundli(userId, response.data);
     }
 
-    if (/^\d{1,2}:\d{1,2}$/.test(tob)) {
-      return tob;
-    }
+    // ================= SAVE CACHE =================
 
-    return null;
-  };
+    await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
 
-  // ---------------- Resolve DOB / TOB ----------------
-  let hourMin = profile.birthTime ? convertTo24Hour(profile.birthTime) : null;
+    logger.info("Ascendant cached");
 
-  const cleanedTOB = cleanTOB(tob || hourMin);
-  if (!cleanedTOB) {
-    throw new Error("Invalid time of birth format. Use HH:mm (Example: 17:56)");
+    return response.data;
+  } catch (err) {
+    logger.error("[ASCENDANT ERROR]", err.response?.data || err.message);
+    throw err;
   }
-
-  const getTimeZoneOffset = (date) => -new Date(date).getTimezoneOffset() / 60;
-
-  dob = dob || (profile.birthDate ? formatDate(profile.birthDate) : null);
-  tob = cleanedTOB;
-  tz = tz || (profile.birthDate ? getTimeZoneOffset(profile.birthDate) : null);
-  birthPlace =
-    birthPlace || (profile.birthPlace ? profile.birthPlace.trim() : null);
-
-  if (!dob || !tob || tz === null || tz === undefined || !birthPlace) {
-    throw new Error("Missing birth details (dob/tob/tz/birthPlace)");
-  }
-  if (dob.includes("/")) {
-    const [d, m, y] = dob.split("/");
-    dob = `${d}-${m}-${y}`;
-  }
-  // ---------------- API CALL ----------------
-  const apiUrl = API.ASCENDANT_REPORT({
-    dob,
-    tob,
-    birthPlace,
-    tz,
-    name,
-    lang,
-  });
-
-  logger.info(`[Ascendant API] ${apiUrl}`);
-  const response = await axios.get(apiUrl, {
-    headers: getSaasHeaders(),
-    timeout: 15000,
-  });
-
-  if (response.data?.success && !isQuery) {
-    await updateUserAstrologyWithKundli(userId, response.data);
-  }
-
-  // ---------------- Cache ----------------
-  await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-  logger.info(`Cached Ascendant Report for userId=${userId}`);
-
-  return response.data;
 };
 
 const getMonthlyChoghadiya = async (userId, location, month, isQuery) => {
@@ -923,8 +955,10 @@ const getFullNumerology = async (userId, isQuery, queryParams = {}) => {
     logger.info(`[NUMEROLOGY] API URL => ${apiUrl}`);
 
     const response = await axios.get(apiUrl, {
-       headers: getSaasHeaders(),
-        timeout: 15000,
+      headers: {
+        "x-api-key": process.env.SAAS_API_KEY,
+        "Content-Type": "application/json",
+      },
     });
 
     await CacheService.set(
@@ -1039,7 +1073,7 @@ const getFullKundliData = async (userId, options = {}, isQuery = false) => {
 
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
-    `full-kundli-${userId}-${apiParams.lang}-${apiParams.div}-${apiParams.style}-${apiParams.name}`,
+    `full-kundli-${userId}-${apiParams.lang}-${apiParams.div}-${apiParams.style}-${apiParams.name}-${dob}-${tob}-${apiParams.birthPlace}`,
     userId,
   );
 

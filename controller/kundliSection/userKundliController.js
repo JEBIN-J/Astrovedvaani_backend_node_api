@@ -3,50 +3,65 @@ const asyncHandler = require("../../middlewares/asyncHandler");
 const userKundliService = require("../../services/kundli/userKundliService");
 const { default: API } = require("../../services/kundli/api");
 const { default: axios } = require("axios");
+const { getSaasHeaders } = require("../../utils/apiHeader");
 const getMatchMaking = asyncHandler(async (req, res) => {
   const userId = req.user?._id || null;
   const { partnerId, ...directParams } = req.query;
 
   let matchData;
 
-  // ✅ Token user + partnerId → User DB-based matchmaking
   if (userId && partnerId) {
     matchData = await userKundliService.getMatchMakingData(userId, partnerId);
-  }
+  } else if (Object.keys(directParams).length > 0) {
+    const formatDOB = (dob) => {
+      if (!dob) return dob;
 
-  // ✅ Direct params matchmaking (no token needed)
-  else if (Object.keys(directParams).length > 0) {
-    const requiredParams = [
-      "boy_dob",
-      "boy_tob",
-      "boy_tz",
-      "boy_birthPlace",
-      "girl_dob",
-      "girl_tob",
-      "girl_tz",
-      "girl_birthPlace",
-      "lang",
-    ];
+      const parts = dob.replace(/\//g, "-").split("-");
 
-    const missingParams = requiredParams.filter((p) => !(p in directParams));
+      if (parts.length !== 3) return dob;
 
-    // if (missingParams.length > 0) {
-    //   throw new BadRequestError(
-    //     `Missing required parameters: ${missingParams.join(", ")}`,
-    //   );
-    // }
+      let [d, m, y] = parts;
 
-    // ✅ ONLY CHANGE: API KEY HEADER ADDED
-    const response = await axios.get(API.MATCH_MAKING(directParams), {
-      headers: getSaasHeaders(),
+      d = d.padStart(2, "0");
+      m = m.padStart(2, "0");
+
+      return `${d}-${m}-${y}`;
+    };
+
+    if (directParams.boy_dob) {
+      directParams.boy_dob = formatDOB(directParams.boy_dob);
+    }
+
+    if (directParams.girl_dob) {
+      directParams.girl_dob = formatDOB(directParams.girl_dob);
+    }
+
+    if (directParams.lang) {
+      directParams.lang = directParams.lang.trim();
+    } else {
+      directParams.lang = "en";
+    }
+
+    if (!directParams.boy_name) {
+      directParams.boy_name = "Boy";
+    }
+
+    if (!directParams.girl_name) {
+      directParams.girl_name = "Girl";
+    }
+
+    const finalUrl = API.MATCH_MAKING(directParams);
+
+    const response = await axios.get(finalUrl, {
+      headers: {
+        "x-api-key": process.env.SAAS_API_KEY,
+        "Content-Type": "application/json",
+      },
       timeout: 15000,
     });
 
     matchData = response.data;
-  }
-
-  // ❌ Neither token nor params provided
-  else {
+  } else {
     throw new BadRequestError(
       "Either provide logged-in user & partnerId OR all direct parameters",
     );
