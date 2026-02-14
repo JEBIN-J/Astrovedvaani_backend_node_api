@@ -22,6 +22,7 @@ const astrologerPriorityRoutes = require("./astrologerPriorityRoute");
 const metaSeoRoutes = require("./metaSeoRoute");
 const mediaContentRoutes = require("./mediaContent");
 const dashboardRoutes = require("./dashboardRoute");
+const astrologyServiceDetailsRoutes = require("./astrologyServiceDetailsRoutes");
 router.use(
   "/faq",
   authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
@@ -127,6 +128,11 @@ router.use(
   "/media-content",
   authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
   mediaContentRoutes,
+);
+router.use(
+  "/astrology-service-details",
+  authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
+  astrologyServiceDetailsRoutes,
 );
 router.use(
   "/dashboard",

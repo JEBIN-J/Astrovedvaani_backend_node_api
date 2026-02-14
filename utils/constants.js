@@ -368,6 +368,21 @@ const Enums = {
       },
     },
   },
+
+  ASTROLOGY: {
+    CATEGORY: {
+      RELATIONSHIP: 1000,
+      VEDIC: 1001,
+      ZODIAC: 1002,
+      NAKSHATRA: 1003,
+      MAHURAT: 1004,
+      PALMISTRY: 1005,
+      PLANET: 1006,
+      NUMEROLOGY: 1007,
+      REMEDIES: 1008,
+      TAROT: 1009,  
+    }
+  },
 };
 
 Object.freeze(Enums);
