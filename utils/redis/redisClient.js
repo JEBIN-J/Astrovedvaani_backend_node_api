@@ -4,36 +4,47 @@ const logger = require("../logger");
 class RedisClient {
   constructor() {
     if (!RedisClient.instance) {
+      const REDIS_DB = process.env.REDIS_DB || 0;
+
       this.client = redis.createClient({
         socket: {
-          host: "127.0.0.1",
-          port: 6379,
+          host: process.env.REDIS_HOST || "127.0.0.1",
+          port: process.env.REDIS_PORT || 6379,
           connectTimeout: 10000,
           reconnectStrategy: (retries) => {
             logger.warn(`Redis reconnect attempt #${retries}`);
             return Math.min(retries * 200, 2000);
           },
         },
+        database: Number(REDIS_DB), // 🔥 KEY PART
       });
 
-      this.client.on("connect", () => logger.info("Redis socket connected"));
-      this.client.on("ready", () => logger.info("Redis ready"));
-      this.client.on("error", (err) => logger.error("Redis client error:", err));
-      this.client.on("end", () => logger.warn("Redis connection closed"));
+      this.client.on("connect", () =>
+        logger.info(`Redis socket connected (DB ${REDIS_DB})`)
+      );
+
+      this.client.on("ready", () =>
+        logger.info(`Redis ready (DB ${REDIS_DB})`)
+      );
+
+      this.client.on("error", (err) =>
+        logger.error("Redis client error:", err)
+      );
+
+      this.client.on("end", () =>
+        logger.warn("Redis connection closed")
+      );
 
       RedisClient.instance = this;
     }
+
     return RedisClient.instance;
   }
 
   async connect() {
-    try {
-      if (!this.client.isOpen) {
-        await this.client.connect();
-        logger.info("Redis connected successfully");
-      }
-    } catch (err) {
-      logger.error("Redis connection failed:", err);
+    if (!this.client.isOpen) {
+      await this.client.connect();
+      logger.info("Redis connected successfully");
     }
   }
 
