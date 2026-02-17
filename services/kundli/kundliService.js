@@ -42,6 +42,8 @@ const getKundliData = async (userId, queryParams = {}, isRelative = false) => {
     throw new Error("Astrology profile not found for user");
   }
 
+  console.log("User profile found:", profile);
+
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
     "kundli-basic",
@@ -227,7 +229,7 @@ const getKundliDetailsData = async (userId, isQuery, queryParams = {}) => {
   return response.data;
 };
 
-const getKPDetails = async (userId, queryParams = {}) => {
+const getKPDetails = async (userId, queryParams = {}, isRelative = false) => {
   logger.info(`getKPDetails called for userId=${userId}`);
 
   const cacheKey = CacheService.generateKey(
@@ -243,22 +245,18 @@ const getKPDetails = async (userId, queryParams = {}) => {
     return cachedData;
   }
 
-  let profile;
-  if (!queryParams.dob) {
+ let profile;
+  if (isRelative) {
+    profile = await UserAstrology.findById(userId);
+  } else {
     profile = await UserAstrology.findOne({
       userId,
       relationshipToOwner: "self",
     });
+  }
 
-    if (!profile) {
-      logger.error("Astrology profile not found for user");
-      throw new Error("Astrology profile not found for user");
-    }
-
-    if (!profile.birthDate || !profile.birthTime || !profile.birthPlace) {
-      logger.error("Missing birth details in profile");
-      throw new Error("Missing birth details in profile");
-    }
+  if (!profile) {
+    throw new Error("Astrology profile not found for user");
   }
 
   const formatDate = (date) => {

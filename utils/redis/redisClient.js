@@ -5,73 +5,49 @@ class RedisClient {
   constructor() {
     if (!RedisClient.instance) {
       this.client = redis.createClient({
-        url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
+        socket: {
+          host: "127.0.0.1",
+          port: 6379,
+          connectTimeout: 10000,
+          reconnectStrategy: (retries) => {
+            logger.warn(`Redis reconnect attempt #${retries}`);
+            return Math.min(retries * 200, 2000);
+          },
+        },
       });
-      this._connect();
+
+      this.client.on("connect", () => logger.info("Redis socket connected"));
+      this.client.on("ready", () => logger.info("Redis ready"));
+      this.client.on("error", (err) => logger.error("Redis client error:", err));
+      this.client.on("end", () => logger.warn("Redis connection closed"));
+
       RedisClient.instance = this;
     }
     return RedisClient.instance;
   }
 
-  async _connect() {
+  async connect() {
     try {
-      await this.client.connect();
-      logger.info("Redis connected");
-
-      this.client.on("error", (err) => {
-        logger.error("Redis client error:", err);
-      });
-      this.client.on("reconnecting", () => {
-        logger.warn("Redis client reconnecting...");
-      });
-
-      await this.flushDb();
+      if (!this.client.isOpen) {
+        await this.client.connect();
+        logger.info("Redis connected successfully");
+      }
     } catch (err) {
-      logger.error("Redis connection error:", err);
-      process.exit(1);
-    }
-  }
-  async flushDb() {
-    try {
-      await this.client.flushDb();
-      logger.warn("[Cache] Redis DB cleared on server restart");
-    } catch (err) {
-      logger.error("Error flushing Redis DB:", err);
+      logger.error("Redis connection failed:", err);
     }
   }
 
-  async get(key) {
-    return this.client.get(key);
-  }
+  get(key) { return this.client.get(key); }
+  set(key, value) { return this.client.set(key, value); }
+  setEx(key, ttl, value) { return this.client.setEx(key, ttl, value); }
+  del(key) { return this.client.del(key); }
+  keys(pattern) { return this.client.keys(pattern); }
+  ping() { return this.client.ping(); }
 
-  async setEx(key, ttl, value) {
-    return this.client.setEx(key, ttl, value);
-  }
+  async flushDb() { await this.client.flushDb(); }
+  async flushAll() { await this.client.flushAll(); }
 
-  async set(key, value) {
-    return this.client.set(key, value);
-  }
-
-  async del(key) {
-    return this.client.del(key);
-  }
-
-  async ping() {
-    return this.client.ping();
-  }
-  async keys(pattern) {
-    return this.client.keys(pattern);
-  }
-
-  // 🔑 Force clear Redis cache
-  async flushAll() {
-    try {
-      await this.client.flushAll();
-      logger.warn("[Cache] Entire Redis cache cleared on server restart");
-    } catch (err) {
-      logger.error("Error flushing Redis cache:", err);
-    }
-  }
+  getClient() { return this.client; }
 }
 
 module.exports = new RedisClient();

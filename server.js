@@ -1,6 +1,8 @@
 const { initPhonePeClient } = require("./config/phonepeClient");
 const ThirdPartyIntegration = require("./models/ThirdPartyIntegration");
 const Enums = require("./utils/constants");
+const redisClient = require("./utils/redis/redisClient");
+
 
 try {
   const logger = require("./utils/logger");
@@ -11,6 +13,8 @@ try {
   const ENV = process.env.NODE_ENV || "development";
   (async () => {
     try {
+      await redisClient.connect();
+      logger.info("Redis connection established at startup");
       const phonepeIntegration = await ThirdPartyIntegration.findOne({
         provider: Enums.INTEGRATION.PROVIDER.PHONEPAY,
         type: Enums.INTEGRATION.TYPE.PAYMENT,

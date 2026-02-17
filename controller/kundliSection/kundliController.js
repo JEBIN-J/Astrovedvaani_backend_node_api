@@ -5,134 +5,90 @@ const kundliService = require("../../services/kundli/kundliService");
 const { getPanchangData } = require("../../services/kundli/panchangService");
 const logger = require("../../utils/logger");
 
-const getKundli = asyncHandler(async (req, res) => {
-  const { day, month, year, hour, min, tz, lang, name, birthPlace } = req.query;
-  const userId = req.user?._id;
-  if (!userId) throw new BadRequestError("User ID is missing");
+const extractCommonParams = (req) => {
+  const isRelative = Boolean(req.query?.id);
+  const userId = req.query?.id || req.user?._id;
 
-  const kundliData = await kundliService.getKundliData(userId, {
-    day,
-    month,
-    year,
-    hour,
-    min,
-    tz,
-    lang,
-    name,
-    birthPlace,
-  });
+  if (!userId) {
+    throw new BadRequestError("User ID is missing");
+  }
+
+  return {
+    userId,
+    isRelative,
+    queryParams: { ...req.query },
+  };
+};
+
+const getKundli = asyncHandler(async (req, res) => {
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
+
+  const kundliData = await kundliService.getKundliData(
+    userId,
+    queryParams,
+    isRelative,
+  );
 
   res.status(200).json(kundliData);
 });
 
 const getKundliDetails = asyncHandler(async (req, res) => {
-  const { day, month, year, hour, min, tz, lang, name, birthPlace } = req.query;
-
-  const queryParams = {
-    day,
-    month,
-    year,
-    hour,
-    min,
-    tz,
-    lang,
-    name,
-    birthPlace,
-  };
+   const { userId, queryParams, isRelative } = extractCommonParams(req);
 
   const kundliDetailsData = await kundliService.getKundliDetailsData(
-    req.user?._id,
-    false,
+    userId,
     queryParams,
+    isRelative,
   );
 
   res.status(200).json(kundliDetailsData);
 });
 
 const getKPDetails = asyncHandler(async (req, res) => {
-  const { dob, tob, tz, birthPlace } = req.query;
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  const userId = req.user?._id;
-  if (!userId) throw new BadRequestError("User ID is missing");
-
-  const kundliDetailsData = await kundliService.getKPDetails(userId, {
-    dob,
-    tob,
-    tz,
-    birthPlace,
-  });
+  const kundliDetailsData = await kundliService.getKPDetails(
+    userId,
+    queryParams,
+    isRelative,
+  );
 
   res.status(200).json(kundliDetailsData);
 });
 
 const getAshtakvargaCharts = asyncHandler(async (req, res) => {
-  const { dob, tob, tz, birthPlace, style = "north" } = req.query;
-  const userId = req.user?._id;
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  if (!userId) throw new BadRequestError("User ID is missing");
   const kundliDetailsData = await kundliService.getAshtakvargaCharts(
     userId,
-    style,
-    dob,
-    tob,
-    tz,
-    birthPlace,
-    false,
+    queryParams,
+    isRelative,
   );
   res.status(200).json(kundliDetailsData);
 });
 
 const getCharts = asyncHandler(async (req, res) => {
-  const userId = req.user?._id;
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  if (!userId) throw new BadRequestError("User ID is missing");
-  const div = req.query.div || "D1";
-  const style = req.query.style || "north";
-  const lang = req.query.lang || "en";
-  const dob = req.query.dob;
-  const tob = req.query.tob;
-  const tz = req.query.tz;
-  const birthPlace = req.query.birthPlace;
-  const chartData = await kundliService.getCharts(
+  const data = await kundliService.getCharts(
     userId,
-    div,
-    style,
-    lang,
-    dob,
-    tob,
-    tz,
-    birthPlace,
-    false,
+    queryParams,
+    isRelative,
   );
-  res.status(200).json(chartData);
+
+  res.status(200).json(data);
 });
 
 const getDasha = asyncHandler(async (req, res) => {
-  const { day, month, year, hour, min, tz, lang, name, location } = req.query;
-  const userId = req.user?._id;
-  const useQueryParams = Boolean(
-    day && month && year && hour && min && location,
-  );
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  if (!userId && !useQueryParams) {
-    throw new BadRequestError("Either User ID or birth details are required");
-  }
-
-  const dashaData = await kundliService.getDasha(
+  const data = await kundliService.getDasha(
     userId,
-    useQueryParams,
-    day,
-    month,
-    year,
-    hour,
-    min,
-    tz,
-    lang,
-    name,
-    location,
+    queryParams,
+    isRelative,
   );
 
-  res.status(200).json(dashaData);
+  res.status(200).json(data);
 });
 
 const getAscendantReport = asyncHandler(async (req, res) => {
