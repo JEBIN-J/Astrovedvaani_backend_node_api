@@ -59,18 +59,29 @@ const getKPDetails = asyncHandler(async (req, res) => {
 const getAshtakvargaCharts = asyncHandler(async (req, res) => {
   const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  const kundliDetailsData = await kundliService.getAshtakvargaCharts(
+  console.log("Query Params in Controller:", queryParams);
+  console.log("User ID in Controller:", userId);
+  console.log("Is Relative in Controller:", isRelative);
+
+  console.log("Extracted Params:", { userId, queryParams, isRelative });
+
+  const kundliDetailsData = await kundliService.getAshtakvargaChartDetails(
     userId,
     queryParams,
     isRelative,
   );
+
+  console.log("Ashtakvarga Chart Details Data:", kundliDetailsData);
   res.status(200).json(kundliDetailsData);
 });
 
 const getCharts = asyncHandler(async (req, res) => {
   const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  const data = await kundliService.getCharts(
+    console.log("Extracted Params:", { userId, queryParams, isRelative });
+
+
+  const data = await kundliService.getChartDetails(
     userId,
     queryParams,
     isRelative,
@@ -177,38 +188,18 @@ const getChoghadiya = asyncHandler(async (req, res) => {
 });
 
 const getFullKundliData = asyncHandler(async (req, res) => {
-  const userId = req.query.id || req.user?._id;
-  // if (!userId) throw new BadRequestError("User ID is missing");
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  let { day, month, year, hour, min, tz, lang, name, birthPlace, div, style } =
-    req.query;
-
-  // Normalize query params
-  day = day ? String(day).padStart(2, "0") : undefined;
-  month = month ? String(month).padStart(2, "0") : undefined;
-  hour = hour ? String(hour).padStart(2, "0") : undefined;
-  min = min ? String(min).padStart(2, "0") : undefined;
-  tz = tz ? Number(tz) : 5.5; // default to 5.5
-  year = year ? Number(year) : undefined;
-
-  const isQuery = Object.keys(req.query).length > 0;
+  console.log("Extracted Params for Full Kundli Data:", {
+    userId,
+    queryParams,
+    isRelative,
+  });
 
   const kundliData = await kundliService.getFullKundliData(
     userId,
-    {
-      day,
-      month,
-      year,
-      hour,
-      min,
-      tz,
-      lang,
-      name,
-      birthPlace,
-      div,
-      style,
-    },
-    isQuery,
+    queryParams,
+    isRelative,
   );
 
   res.status(200).json(kundliData);
