@@ -379,132 +379,50 @@ const getDasha = async (userId, queryParams = {}, isRelative = false) => {
 };
 
 const getAscendantReport = async (
-  userId,
-  lang = "en",
-  dob,
-  tob,
-  tz,
-  birthPlace,
-  isQuery,
-  name,
+  userId, queryParams = {}, isRelative = false
 ) => {
   try {
-    logger.info(`Ascendant for user=${userId}`);
+    const profile = await getProfile(userId, isRelative);
+  if (!profile) throw new Error("Astrology profile not found");
 
-    // ================= PROFILE =================
-    let profile;
-
-    if (!isQuery) {
-      profile = await UserAstrology.findOne({
-        userId,
-        relationshipToOwner: "self",
-      });
-    } else {
-      profile = await UserAstrology.findById(userId);
-    }
-
-    // if (!profile) {
-    //   throw new Error("Astrology profile not found");
-    // }
-
-    // ================= HELPERS =================
-
-    // DD/MM/YYYY → DD-MM-YYYY
-    const formatDOB = (date) => {
-      if (!date) return null;
-
-      if (typeof date === "string" && date.includes("/")) {
-        const [d, m, y] = date.split("/");
-        return `${d.padStart(2, "0")}-${m.padStart(2, "0")}-${y}`;
-      }
-
-      const dt = new Date(date);
-
-      return `${String(dt.getDate()).padStart(2, "0")}-${String(
-        dt.getMonth() + 1,
-      ).padStart(2, "0")}-${dt.getFullYear()}`;
-    };
-
-    // HH:mm only
-    const formatTOB = (time) => {
-      if (!time) return null;
-
-      if (/^\d{1,2}:\d{2}$/.test(time)) {
-        const [h, m] = time.split(":");
-        return `${h.padStart(2, "0")}:${m}`;
-      }
-
-      if (/^\d{1,2}:\d{2}:\d{2}$/.test(time)) {
-        const [h, m] = time.split(":");
-        return `${h.padStart(2, "0")}:${m}`;
-      }
-
-      return null;
-    };
-
-    const getTZ = (date) => -new Date(date).getTimezoneOffset() / 60;
-
-    // ================= FINAL VALUES =================
-
-    const finalDOB = formatDOB(dob || profile.birthDate);
-
-    const finalTOB = formatTOB(tob || convertTo24Hour(profile.birthTime));
-
-    const finalTZ = tz || getTZ(profile.birthDate) || 5.5;
-
-    const finalPlace = birthPlace || profile.birthPlace?.trim();
-
-    const finalName = name || profile.name || "User";
-
-    // ================= VALIDATION =================
-
-    if (!finalDOB || !finalTOB || !finalPlace) {
-      throw new Error("Missing DOB / TOB / Place");
-    }
-
+  const params = normalizeParams(queryParams, profile);
     // ================= CACHE KEY (AFTER DATA READY) =================
 
     const cacheKey = CacheService.generateKey(
       CacheService.CACHE_PREFIXES.USER_DETAILS,
-      `ascendant-${lang}-${finalDOB}-${finalTOB}-${finalPlace}-${finalTZ}`,
+      `ascendant-${params}`,
       userId,
+      JSON.stringify(params),
     );
 
-    // const cached = await CacheService.get(cacheKey);
+    const cached = await CacheService.get(cacheKey);
 
-    // if (cached) {
-    //   logger.info("Ascendant returned from cache");
-    //   return cached;
-    // }
+    if (cached) {
+      logger.info("Ascendant returned from cache");
+      return cached;
+    }
 
     // ================= API =================
 
+    console.log("Params for Ascendant Report:", params);
+
     const apiUrl = API.ASCENDANT_REPORT({
-      dob: finalDOB,
-      tob: finalTOB,
-      birthPlace: finalPlace,
-      tz: finalTZ,
-      name: finalName,
+      ...params,
+      name:queryParams.name || profile?.name || "User",
     });
 
     logger.info(`[Ascendant API] ${apiUrl}`);
 
-    const response = await axios.get(apiUrl, {
-      headers: {
-        "x-api-key": process.env.SAAS_API_KEY,
-        "Content-Type": "application/json",
-      },
-      timeout: 15000,
-    });
+    const response = await callApi(apiUrl);
 
     // ================= UPDATE SELF =================
 
     // if (response.data?.success && !isQuery) {
     //   await updateUserAstrologyWithKundli(userId, response.data);
     // }
-    if (response.data?.success && userId && !isQuery) {
-      await updateUserAstrologyWithKundli(userId, response.data);
-    }
+    // if (response.data?.success && userId && !isRelative) {
+    //   await updateUserAstrologyWithKundli(userId, response.data);
+    // }
 
     // ================= SAVE CACHE =================
 

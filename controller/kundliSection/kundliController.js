@@ -104,30 +104,12 @@ const getDasha = asyncHandler(async (req, res) => {
 
 const getAscendantReport = asyncHandler(async (req, res) => {
  
-  const idParam = req.query.id?.trim();
-  const isQuery = Boolean(idParam);
-
-  const userId = isQuery ? idParam : req.user?._id || null;
-  // if (!userId) throw new BadRequestError("User ID is missing");
-
-  const lang = req.query.lang || "en";
-  const dob = req.query.dob;
-  const tob = req.query.tob;
-  const tz = req.query.tz;
-  const name = req.query.name;
-  const birthPlace = req.query.birthPlace;
-
-  logger.info(`[Ascendant Controller] userId=${userId}, isQuery=${isQuery}`);
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
 
   const reportData = await kundliService.getAscendantReport(
     userId,
-    lang,
-    dob,
-    tob,
-    tz,
-    birthPlace,
-    isQuery, 
-    name,
+    queryParams,
+    isRelative,
   );
 
   res.status(200).json(reportData);
