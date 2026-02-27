@@ -170,7 +170,13 @@ const getChoghadiya = asyncHandler(async (req, res) => {
 });
 
 const getFullKundliData = asyncHandler(async (req, res) => {
-  const { userId, queryParams, isRelative } = extractCommonParams(req);
+  console.log("query",req.query);
+  let { userId, queryParams, isRelative } = extractCommonParams(req);
+
+  if(queryParams?.isAstroSide == 'true')
+  {
+    isRelative=false;
+  }
 
   console.log("Extracted Params for Full Kundli Data:", {
     userId,

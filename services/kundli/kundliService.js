@@ -80,6 +80,8 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
 // =====================================================
 
 const getProfile = async (userId, isRelative) => {
+  console.log("isRelative",isRelative);
+  console.log("userID",userId);
   if (isRelative) {
     return await UserAstrology.findById(userId);
   }
