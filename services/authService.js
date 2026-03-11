@@ -135,27 +135,11 @@ const verifyOtp = async (
   logger.info(`[OTP Verification] Validating OTP for: ${identifierValue}`);
 
   // --- OTP validation placeholder ---
-  // const isValid = await OTPService.validateOTP(identifierValue, otp);
-  // if (!isValid) {
-  //   logger.error(`[OTP Verification] Invalid OTP for: ${identifierValue}`);
-  //   throw new BadRequestError("Invalid or expired OTP");
-  // }
-  let isValid = false;
-
-  if (mobileNumber) {
-    // mobile OTP
-    isValid = await OTPService.validateOTP(identifierValue, otp);
-  } else {
-    // email OTP
-    // console.log("verified");
-    isValid = true;
-    // isValid = await OTPService.validateEmailOTP(identifierValue, otp);
+  const isValid = await OTPService.validateOTP(identifierValue, otp);
+  if (!isValid) {
+    logger.error(`[OTP Verification] Invalid OTP for: ${identifierValue}`);
+    throw new BadRequestError("Invalid or expired OTP");
   }
-
-  // if (!isValid) {
-  //   logger.error(`[OTP Verification] Invalid OTP for: ${identifierValue}`);
-  //   throw new BadRequestError("Invalid or expired OTP");
-  // }
   // --- Check for existing user ---
   logger.info(
     `[OTP Verification] Looking for user with query: ${JSON.stringify(query)}`,
