@@ -39,50 +39,80 @@ const getSMSIntegration = async () => {
   }
 };
 
-
 const sendOTP = async (mobile, otp) => {
   try {
-    logger.info(`[SMS] Preparing OTP for ${mobile}`);
     const integration = await getSMSIntegration();
-    if (!integration) throw new Error("SMS integration not configured");
-    const { base_url, api_key, extra_config } = integration;
-    const {
-      route = "dlt",
-      sender_id = "LOYAST",
-      message = "201329",
-      flash = "0",
-    } = extra_config;
-    const cleanMobile = mobile.replace("+91", "").replace(/^91/, "");
-    const params = {
-      authorization: api_key,
-      route,
-      sender_id,
-      message,
-      variables_values: `${otp}|`,
-      numbers: cleanMobile,
-      flash,
+    if (!integration) {
+      throw new Error("SMS integration not configured");
+    }
+
+    const { api_key, base_url, extra_config } = integration;
+    const { template_id } = extra_config;
+
+    if (!template_id) {
+      throw new Error("MSG91 FLOW template_id missing");
+    }
+
+    const cleanMobile = mobile
+      .toString()
+      .replace(/\s+/g, "")
+      .replace("+91", "")
+      .replace(/^91/, "");
+
+    const formattedMobile = `91${cleanMobile}`;
+
+    const payload = {
+      template_id: template_id,
+      short_url: "0",
+      realTimeResponse: "1",
+      recipients: [
+        {
+          mobiles: formattedMobile,
+          var: String(otp), // OTP goes into VAR1
+        },
+      ],
     };
-    logger.info(`[SMS] Sending GET request to: ${base_url}`);
-    logger.info(`[SMS] Query Params: ${JSON.stringify(params)}`);
-    const response = await axios.get(base_url, {
-      params,
+
+    console.log("========== MSG91 FLOW REQUEST ==========");
+    console.log("URL:", base_url);
+    console.log("Headers: authkey =", "***");
+    console.log("Body:", JSON.stringify(payload, null, 2));
+    console.log("=======================================");
+
+    const response = await axios.post(base_url, payload, {
+      headers: {
+        "Content-Type": "application/json",
+        authkey: api_key,
+        accept: "application/json",
+      },
       timeout: 8000,
+      validateStatus: () => true,
     });
-    logger.info(`[SMS] Response Status: ${response.status}`);
-    logger.info(`[SMS] Response Body: ${JSON.stringify(response.data)}`);
-    const data = response.data || {};
-    if (response.status !== 200 || data.return === false) {
-      throw new Error(data.message || `Fast2SMS error (${response.status})`);
+
+    console.log("========== MSG91 FLOW RESPONSE ==========");
+    console.log("HTTP Status:", response.status);
+    console.log("Body:", response.data);
+    console.log("========================================");
+
+    if (response.status !== 200) {
+      throw new Error(`FLOW HTTP error: ${response.status}`);
     }
-    logger.info(`[SMS]OTP sent successfully to ${mobile}`);
-    return data;
+
+    return {
+      success: true,
+      provider: "MSG91_FLOW",
+      response: response.data,
+    };
   } catch (error) {
-    logger.error(`[SMS] Error sending OTP: ${error.message}`);
-    if (error.response) {
-      logger.error(`[SMS] Response Data: ${JSON.stringify(error.response.data)}`);
-      logger.error(`[SMS] Status Code: ${error.response.status}`);
-    }
-    throw new Error("Failed to send OTP");
+    console.error("========== FLOW OTP ERROR ==========");
+    console.error(error);
+    console.error("===================================");
+
+    return {
+      success: false,
+      provider: "MSG91_FLOW",
+      message: error.message || "Failed to send OTP via FLOW",
+    };
   }
 };
 module.exports = {

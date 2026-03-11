@@ -80,8 +80,8 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
 // =====================================================
 
 const getProfile = async (userId, isRelative) => {
-  console.log("isRelative",isRelative);
-  console.log("userID",userId);
+  console.log("isRelative", isRelative);
+  console.log("userID", userId);
   if (isRelative) {
     return await UserAstrology.findById(userId);
   }
@@ -95,7 +95,7 @@ const getProfile = async (userId, isRelative) => {
 const callApi = async (apiUrl) => {
   const response = await axios.get(apiUrl, {
     headers: getSaasHeaders(),
-    timeout: 15000,
+    // timeout: 15000,
   });
 
   return response;
@@ -381,13 +381,15 @@ const getDasha = async (userId, queryParams = {}, isRelative = false) => {
 };
 
 const getAscendantReport = async (
-  userId, queryParams = {}, isRelative = false
+  userId,
+  queryParams = {},
+  isRelative = false,
 ) => {
   try {
     const profile = await getProfile(userId, isRelative);
-  if (!profile) throw new Error("Astrology profile not found");
+    if (!profile) throw new Error("Astrology profile not found");
 
-  const params = normalizeParams(queryParams, profile);
+    const params = normalizeParams(queryParams, profile);
     // ================= CACHE KEY (AFTER DATA READY) =================
 
     const cacheKey = CacheService.generateKey(
@@ -410,7 +412,7 @@ const getAscendantReport = async (
 
     const apiUrl = API.ASCENDANT_REPORT({
       ...params,
-      name:queryParams.name || profile?.name || "User",
+      name: queryParams.name || profile?.name || "User",
     });
 
     logger.info(`[Ascendant API] ${apiUrl}`);
@@ -649,9 +651,7 @@ const getFullKundliData = async (
     style,
   };
 
-  logger.info(
-    `FullKundli normalized params: ${JSON.stringify(apiParams)}`,
-  );
+  logger.info(`FullKundli normalized params: ${JSON.stringify(apiParams)}`);
 
   // ======================================
   // CACHE KEY
@@ -688,7 +688,7 @@ const getFullKundliData = async (
   fullKundliData = {
     ...fullKundliData,
     data: {
-      ...fullKundliData.data
+      ...fullKundliData.data,
     },
   };
 

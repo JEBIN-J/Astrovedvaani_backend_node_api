@@ -51,7 +51,6 @@ const getHoroscopeData = async ({
       `[Horoscope] getHoroscopeData called: userId=${userId}, type=${type}, date=${date}, week=${week}, lang=${lang}`,
     );
 
-    // ----------------- USER ASTROLOGY PROFILE -----------------
     let profile;
     if (!isQuery) {
       profile = await UserAstrology.findOne({
@@ -74,12 +73,10 @@ const getHoroscopeData = async ({
       ? zodiac.toLowerCase()
       : profile.rasi.toLowerCase();
 
-    // ✅ daily ke liye safe date
     const formattedDate = date
       ? formatDateForApi(date)
       : formatDateForApi(new Date());
 
-    // ----------------- SELECT API -----------------
     let apiUrl;
     switch (type) {
       case "daily":
@@ -112,8 +109,6 @@ const getHoroscopeData = async ({
     }
 
     logger.info(`[Horoscope] Prepared API URL: ${apiUrl}`);
-
-    // ----------------- HIT EXTERNAL API -----------------
     let response;
     try {
       response = await axios.get(apiUrl, {

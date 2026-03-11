@@ -3,14 +3,12 @@ const asyncHandler = require("../../middlewares/asyncHandler");
 const horoscopeService = require("../../services/kundli/horoscopeService");
 
 const getHoroscope = asyncHandler(async (req, res) => {
-  const { type, date, lang = "en", zodiac, id } = req.query;
-
+  const { type, date, lang = "en", id, zodiac } = req.query;
   if (!type) {
     throw new BadRequestError(
       "Horoscope type is required (daily, weekly, monthly, yearly)",
     );
   }
-
   const tokenUserId = req.user?._id || null;
   const userId = id || tokenUserId;
   const isQuery = Boolean(id);
