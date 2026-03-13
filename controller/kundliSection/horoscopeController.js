@@ -55,7 +55,17 @@ const getGoodBadDays = asyncHandler(async (req, res) => {
   const id = req.query.id;
   const userId = id || req.user?._id;
   const isQuery = Boolean(id);
-  const goodBadDays = await horoscopeService.getGoodBadDays(userId, isQuery);
+
+  // Controller se location aur month lo
+  const { location, month } = req.query;
+
+  const goodBadDays = await horoscopeService.getGoodBadDays(
+    userId,
+    isQuery,
+    location,
+    month,
+  );
+
   res.status(200).json(goodBadDays);
 });
 

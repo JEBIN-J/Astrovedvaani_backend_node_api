@@ -55,11 +55,26 @@ const remove = async (req, res) => {
     res.status(404).json({ success: false, message: err.message });
   }
 };
-
+const getConfigByType = async (req, res) => {
+  try {
+    const { type } = req.query;
+    if (!type) {
+      return res.status(400).json({
+        success: false,
+        message: "type query parameter is required",
+      });
+    }
+    const results = await integrationService.getConfigByType(type);
+    res.status(200).json({ success: true, data: results });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 module.exports = {
   addService,
   updateService,
   toggleActive,
   getAll,
   remove,
+  getConfigByType,
 };

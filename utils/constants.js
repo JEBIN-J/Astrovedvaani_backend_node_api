@@ -273,6 +273,7 @@ const Enums = {
       CALL: 4006,
       SHIPPING: 4007,
       APP_OAUTH: 4008,
+      WHATSAPP: 4009,
     },
     PROVIDER: {
       TWILIO: 4100,
@@ -294,6 +295,7 @@ const Enums = {
       DELHIVERY: 4116,
       BLUEDART: 4117,
       AMAZESMS: 4118,
+      WHATSAPP: 4119,
     },
   },
 
@@ -304,7 +306,6 @@ const Enums = {
       CITY: 5200,
     },
   },
-
 
   SPECIALIZATION: {
     RELATED_TO: {
@@ -339,6 +340,7 @@ const Enums = {
       SESSION: 7100,
       POOJA: 7200,
       ORDER: 7300,
+      COMMON: 7400,
     },
   },
   SESSION_INTERVAL: {
@@ -380,8 +382,8 @@ const Enums = {
       PLANET: 1006,
       NUMEROLOGY: 1007,
       REMEDIES: 1008,
-      TAROT: 1009,  
-    }
+      TAROT: 1009,
+    },
   },
 };
 

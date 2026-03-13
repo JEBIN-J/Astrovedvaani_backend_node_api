@@ -12,6 +12,7 @@ const giftController = require("../../controller/admin/giftController");
 const chatController = require("../../controller/user/UserController");
 const coupanController = require("../../controller/admin/coupanController");
 const adminSkillsController = require("../../controller/admin/AstrologerSkillsAndLanguageController");
+const configController = require("../../controller/admin/ServiceController");
 const router = express.Router();
 
 router.get("/fetch-astrologers", authMiddleware, userController.getAstrologers);
@@ -105,5 +106,9 @@ router.get(
 router.get("/chat/list", authMiddleware, chatController.getChatList);
 router.get("/global-search", authMiddleware, userController.globalSearch);
 router.get("/filter", authMiddleware, adminSkillsController.getSkills);
-
+router.get(
+  "/getConfigByType",
+  authMiddleware,
+  configController.getConfigByType,
+);
 module.exports = router;

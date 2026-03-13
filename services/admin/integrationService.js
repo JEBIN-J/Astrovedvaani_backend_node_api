@@ -23,14 +23,15 @@ const createIntegration = async (data) => {
   const { type, provider } = data;
   const existing = await ThirdPartyIntegration.findOne({ type, provider });
   if (existing) {
-    throw new Error(`Integration already exists for provider ${provider} and type ${type}`);
+    throw new Error(
+      `Integration already exists for provider ${provider} and type ${type}`,
+    );
   }
   const newIntegration = new ThirdPartyIntegration(data);
   const saved = await newIntegration.save();
   await clearIntegrationCacheByType(saved.type);
   return saved;
 };
-
 
 const updateIntegration = async (id, data) => {
   const existing = await ThirdPartyIntegration.findById(id);
@@ -80,6 +81,17 @@ const deactivateOtherIntegrations = async (type, excludeId = null) => {
   await clearIntegrationCacheByType(type);
 };
 
+const getConfigByType = async (type) => {
+  try {
+    const configs = await ThirdPartyIntegration.find({ type });
+    if (!configs || configs.length === 0) {
+      return [];
+    }
+    return configs;
+  } catch (err) {
+    throw new Error(`Failed to fetch integration configs: ${err.message}`);
+  }
+};
 module.exports = {
   createIntegration,
   updateIntegration,
@@ -87,4 +99,5 @@ module.exports = {
   getAllIntegrations,
   deleteIntegration,
   deactivateOtherIntegrations,
+  getConfigByType,
 };

@@ -125,13 +125,17 @@ const completeProfile = async (userId, profileData) => {
   }
 
   logger.info(`Filtered update payload: ${JSON.stringify(updatePayload)}`);
-
   const updatedUser = await User.findOneAndUpdate(
     { _id: userId, role: { $ne: Enums.USER.ROLE.AI_ASTROLOGER } },
-    { $set: updatePayload },
+    {
+      $set: {
+        ...updatePayload,
+        isOnboarded: true,
+      },
+    },
     { new: true },
   ).lean();
-
+  console.log("updated_user", updatedUser);
   // Always set this for astrology collection
   updatePayload.relationshipToOwner = "self";
   const updatedUserAstrology = await UserAstrology.findOneAndUpdate(

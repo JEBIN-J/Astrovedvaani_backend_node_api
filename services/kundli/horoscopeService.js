@@ -266,52 +266,58 @@ const getBigHoroscope = async ({
   }
 };
 
-const getGoodBadDays = async (userId, isQuery) => {
+const getGoodBadDays = async (userId, isQuery, location, month) => {
   try {
     let profile;
-    if (!isQuery) {
-      profile = await UserAstrology.findOne({
-        userId,
-        relationshipToOwner: "self",
-      });
-    } else {
-      profile = await UserAstrology.findById(userId);
+    if (!location) {
+      if (!isQuery) {
+        profile = await UserAstrology.findOne({
+          userId,
+          relationshipToOwner: "self",
+        });
+      } else {
+        profile = await UserAstrology.findById(userId);
+      }
+
+      if (!profile || !profile.birthPlace) {
+        logger.error(
+          `[GoodBadDays] Profile missing or birthPlace not found for userId=${userId}`,
+        );
+        throw new Error(
+          "User astrology profile not found or missing birthPlace.",
+        );
+      }
+
+      location = profile.birthPlace;
     }
-    if (!profile || !profile.rasi) {
-      logger.error(
-        `[GoodBadDays] Profile missing or rasi not found for userId=${userId}`,
-      );
-      throw new Error(
-        "User astrology profile not found or missing zodiac sign (rasi).",
-      );
+
+    // month fallback
+    if (!month) {
+      month = new Date().toLocaleString("en-US", { month: "long" });
     }
-    const zodiac = profile.rasi.toLowerCase();
 
     const cacheKey = CacheService.generateKey(
       "user:details",
       "good-bad-days",
-      zodiac,
+      location,
+      month,
       userId,
     );
+
     const cachedData = await CacheService.get(cacheKey);
+
     if (cachedData) {
       logger.info(`[GoodBadDays] Returning cached data for userId=${userId}`);
       return cachedData;
     }
 
-    const apiUrl = API.GOOD_BAD_DAYS("4");
+    const apiUrl = API.GOOD_BAD_DAYS(location, month);
     logger.info(`[GoodBadDays] Prepared API URL: ${apiUrl}`);
 
-    let response;
-    try {
-      response = await axios.get(apiUrl);
-    } catch (err) {
-      logger.error(
-        `[GoodBadDays] API request failed: ${err.message}`,
-        err.response?.data || {},
-      );
-      throw new Error(`Failed to fetch Good/Bad Days data: ${err.message}`);
-    }
+    const response = await axios.get(apiUrl, {
+      headers: getSaasHeaders(),
+      timeout: 15000,
+    });
 
     await CacheService.set(cacheKey, response.data, HOROSCOPE_CACHE_TTL);
     logger.info(`[GoodBadDays] Cached data for userId=${userId}`);
@@ -322,7 +328,6 @@ const getGoodBadDays = async (userId, isQuery) => {
     throw err;
   }
 };
-
 module.exports = {
   getHoroscopeData,
   getBigHoroscope,

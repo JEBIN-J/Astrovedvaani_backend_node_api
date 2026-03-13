@@ -79,9 +79,8 @@ const API = {
       lang,
     )}&type=${encodeURIComponent(type)}`,
 
-  GOOD_BAD_DAYS: (zodiac) =>
-    `${BASE_URL}/api/goodbaddays?zodiac=${encodeURIComponent(zodiac)}`,
-
+  GOOD_BAD_DAYS: (location, month) =>
+    `${BASE_URL}v1/panchang/choghadiya/monthly?location=${encodeURIComponent(location)}&month=${encodeURIComponent(month)}`,
   KUNDLI: ({
     dob, // DD-MM-YYYY
     tob, // HH:mm

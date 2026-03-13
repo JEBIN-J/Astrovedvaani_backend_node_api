@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const authController = require("../controller/authController");
-
+const User = require("../models/User");
 router.post("/login-via-otp", authController.loginByOTP);
 router.post("/login-via-password", authController.loginByPassword);
 router.get("/google/login", authController.googleLoginRedirect);
@@ -19,15 +19,23 @@ const authenticate = require("../middlewares/authMiddleware");
 router.post("/update-password", authenticate, authController.updatePassword);
 router.post("/reset-password", authController.resetPassword);
 router.delete("/delete-account", authenticate, authController.deleteAccount);
-router.get("/validate-token", authenticate, (req, res) => {
+router.get("/validate-token", authenticate, async (req, res) => {
   const user = req.user;
+
   const authHeader = req.headers.authorization;
   const token = authHeader.split(" ")[1];
+
+  // DB se sirf isOnboarded fetch karo
+  const dbUser = await User.findById(user._id).select("isOnboarded").lean();
+
+  console.log(user);
+
   res.json({
     success: true,
     message: "Login successful",
     accessToken: token,
     role: user.role,
+    isOnboarded: dbUser?.isOnboarded,
   });
 });
 router.post("/send-email-otp", authController.sendEmailOtp);

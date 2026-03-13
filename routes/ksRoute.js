@@ -70,7 +70,7 @@ router.get(
 );
 router.get(
   "/horoscope/good-bad-days",
-  authMiddleware,
+  authKundliMiddleware,
   horosopeController.getGoodBadDays,
 );
 
@@ -122,6 +122,7 @@ router.post(
   authMiddleware,
   panchangaController.scheduleTithi,
 );
+
 router.get("/fetch-tithi", authMiddleware, panchangaController.fetchTithi);
 
 //new

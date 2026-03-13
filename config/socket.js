@@ -80,10 +80,6 @@ class SocketManager {
       registerAgoraCallHandlers(this, socket);
       chatServiceEvents(this, socket);
       registerRejoinService(this, socket);
-      console.log(
-        `[SOCKET] Handling device events for socket ${socket}`,
-        socket,
-      );
       handleDeviceEvents(this, socket);
       this.broadcastOnlineLists();
       socket.on("disconnect", async () => {

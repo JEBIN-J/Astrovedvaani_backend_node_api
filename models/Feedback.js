@@ -18,14 +18,14 @@ const feedbackSchema = new Schema(
 
     source_id: {
       type: Schema.Types.ObjectId, // session/product/pooja-booking ID
-      required: true,
+      // required: true,
     },
 
     rating: {
       type: Number,
       min: 1,
       max: 5,
-      required: true,
+      // required: true,
     },
 
     review: {
@@ -49,7 +49,7 @@ const feedbackSchema = new Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 feedbackSchema.index({ user_id: 1 });
