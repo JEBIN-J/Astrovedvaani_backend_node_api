@@ -6,6 +6,7 @@ const CacheService = require("./cacheService");
 const SESSION_PREFIX = "session:active";
 const ASTRO_BUSY_PREFIX = "astrologer:busy:";
 const USER_PREFIX = "user:info";
+const redis = require("./redisClient");
 
 async function saveSession(sessionId, sessionData, ttl = 60 * 60) {
   if (!sessionId || !sessionData) {
@@ -64,6 +65,28 @@ async function clearSession(sessionId) {
         astrologer_user_id: session.astrologer_user_id,
         is_busy: false,
       });
+
+      ///
+
+      // --- Notify all waiting users ---
+    const { getAndClearBusyWaitList } = require("./sessionCacheService");
+    const sendPushNotification = require("../../services/notification/sendNotification");
+
+    const waitingUsers = await getAndClearBusyWaitList(session.astrologer_user_id);
+
+    if (waitingUsers.length > 0) {
+      logger.info(`[NOTIF] Notifying ${waitingUsers.length} users that astrologer ${session.astrologer_user_id} is FREE`);
+
+      for (const userId of waitingUsers) {
+        await sendPushNotification(
+          userId,
+          "🌟 Astrologer Now Available",
+          "Your astrologer is free now. Start your session!",
+          { type: "ASTRO_FREE", astrologerId: session.astrologer_user_id }
+        );
+      }
+    }
+
       logger.info(`[SessionCache] Emitted availability for astrologer ${session.astrologer_user_id}`);
     } else {
       logger.warn(`[SessionCache] No astrologer_user_id found in session ${sessionId}, cannot clear busy flag`); // <--- NEW
@@ -164,6 +187,21 @@ async function getUser(userId) {
 }
 
 
+/** new fucntion  */
+
+async function addUserToBusyWaitList(astrologerId, userId) {
+  const key = `busy_waiting_users:${astrologerId}`;
+  await redis.sadd(key, userId.toString());
+}
+
+async function getAndClearBusyWaitList(astrologerId) {
+  const key = `busy_waiting_users:${astrologerId}`;
+  const users = await redis.smembers(key);
+  await redis.del(key);
+  return users;
+}
+
+
 module.exports = {
   saveSession,
   updateSession,
@@ -171,5 +209,7 @@ module.exports = {
   getSession,
   checkAstrologerBusy,
   saveUser,
-  getUser
+  getUser,
+  addUserToBusyWaitList,
+  getAndClearBusyWaitList
 };

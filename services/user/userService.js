@@ -16,6 +16,7 @@ const {
   checkAstrologerBusy,
 } = require("../../utils/redis/sessionCacheService");
 const Enums = require("../../utils/constants");
+const AstrologerOfferSchema = require("../../models/AstrologerOfferSchema");
 const { ASTROLOGERS_LIST } = CacheService.CACHE_PREFIXES;
 
 exports.fetchAstrologers = async ({
@@ -281,6 +282,36 @@ exports.fetchAstrologers = async ({
     const hasMore = result.length > limit;
     const data = hasMore ? result.slice(0, -1) : result;
 
+    // 🔥 BULK FETCH OFFERS (NO N+1)
+const astrologerIds = data.map((r) => r.astrologer._id);
+
+const offerDocs = await AstrologerOfferSchema.find(
+  { astrologer_id: { $in: astrologerIds } },
+  { astrologer_id: 1, offers: 1 }
+).lean();
+
+// 🔥 CREATE MAP
+const offerMap = new Map();
+
+const now = new Date();
+
+offerDocs.forEach((doc) => {
+  const activeOffers = (doc.offers || []).filter((offer) => {
+    return (
+      offer.is_active === true &&
+      offer.start_time <= now &&
+      (!offer.end_time || offer.end_time > now)
+    );
+  });
+
+  const serviceMap = new Map();
+  activeOffers.forEach((o) => {
+    serviceMap.set(o.service_type, o);
+  });
+
+  offerMap.set(doc.astrologer_id.toString(), serviceMap);
+});
+
     const formattedData = data.map((r) => ({
       _id: r._id,
       ratings_avg: r.ratings_avg || 0,
@@ -303,7 +334,33 @@ exports.fetchAstrologers = async ({
         },
       },
       user: r.user || null,
-      service_rates: r.service_rates || [],
+      // service_rates: r.service_rates || [],
+      service_rates: (r.service_rates || []).map((rate) => {
+  const astroOffers = offerMap.get(r.astrologer._id.toString());
+  const offer = astroOffers?.get(rate.service_type);
+
+  let final_rate = rate.rate;
+  let is_offer_applied = false;
+
+  if (offer) {
+    if (offer.discount_type === "PERCENTAGE") {
+      final_rate =
+        rate.rate - (rate.rate * offer.discount_value) / 100;
+    } else if (offer.discount_type === "FLAT") {
+      final_rate = rate.rate - offer.discount_value;
+    }
+
+    final_rate = Math.max(0, Math.round(final_rate));
+    is_offer_applied = true;
+  }
+
+  return {
+    service_type: rate.service_type,
+    rate: rate.rate,
+    final_rate,
+    is_offer_applied,
+  };
+}),
     }));
 
     // Set follow info

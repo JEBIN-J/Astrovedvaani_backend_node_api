@@ -112,25 +112,5 @@ class CacheService {
       return null;
     }
   }
-
-    // ✅ ADD BELOW existing methods — DO NOT TOUCH ABOVE CODE
-
-static async sadd(key, value) {
-  try {
-    // redisClient.client is already used elsewhere in this file
-    await redisClient.client.sAdd(key, value);
-  } catch (err) {
-    logger.error("[CacheService] sadd error:", err);
-  }
-}
-
-static async smembers(key) {
-  try {
-    return await redisClient.client.sMembers(key);
-  } catch (err) {
-    logger.error("[CacheService] smembers error:", err);
-    return [];
-  }
-}
 }
 module.exports = CacheService;

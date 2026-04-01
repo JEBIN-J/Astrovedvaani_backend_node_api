@@ -7,11 +7,12 @@ const User = require("../../models/User");
 const Enums = require("../../utils/constants");
 const logger = require("../../utils/logger");
 const CacheService = require("../../utils/redis/cacheService");
+const astrologerOfferService = require("../astrologer/astrologerOfferService");
 const {
   emitAstrologerAvailability,
 } = require("../socket/handleAstrologerEvents");
 
-const ASTROLOGER_CACHE_PREFIX = "astro:list"; // Use same prefix
+const ASTROLOGER_CACHE_PREFIX = "astro:list";
 
 async function createOrUpdateAstrologer(userId, profileData) {
   try {
@@ -165,43 +166,33 @@ async function createOrUpdateRate(astrologerId, data) {
   }
 }
 
-// async function fetchCompleteUserProfile(userId) {
-//   try {
-//     const user = await User.findById(userId).lean();
-//     if (!user) throw new Error("User not found");
-//     const astrologer = await Astrologer.findOne({ user_id: userId }).lean();
-//     let rates = [];
-//     if (astrologer) {
-//       rates = await AstrologerServiceRates.find({
-//         astrologer_id: astrologer._id,
-//       }).lean();
-//     }
-//     const followersCount = astrologer
-//       ? await FollowRequest.countDocuments({ astrologer_id: astrologer._id })
-//       : 0;
-//     const followingCount = await FollowRequest.countDocuments({
-//       user_id: userId,
-//     });
-//     return {
-//       user,
-//       astrologer,
-//       rates,
-//       role: user.role,
-//       followersCount,
-//       followingCount,
-//     };
-//   } catch (error) {
-//     logger.error("Service Error: Failed to fetch complete user profile", error);
-//     throw error;
-//   }
-// }
 async function fetchCompleteUserProfile(userId) {
   try {
-    const user = await User.findById(userId).lean();
+    const user = await User.findById(userId, {
+      name: 1,
+      mobileNumber: 1,
+      countryCode: 1,
+      email: 1,
+      role: 1,
+    }).lean();
+
     if (!user) throw new Error("User not found");
 
-    // ✅ Populate names instead of IDs
-    let astrologer = await Astrologer.findOne({ user_id: userId })
+    let astrologer = await Astrologer.findOne(
+      { user_id: userId },
+      {
+        display_name: 1,
+        bio: 1,
+        experience_years: 1,
+        is_online: 1,
+        is_busy: 1,
+        isChat: 1,
+        isCall: 1,
+        isVideo: 1,
+        specializations: 1,
+        languages_spoken: 1,
+      }
+    )
       .populate("specializations", "name")
       .populate("languages_spoken", "name")
       .lean();
@@ -211,30 +202,54 @@ async function fetchCompleteUserProfile(userId) {
     let ratingsAvg = 0;
 
     if (astrologer) {
-      // Convert populated objects → plain name strings
-      astrologer.specializations =
+      const specializations =
         astrologer.specializations?.map((s) => s.name) || [];
-      astrologer.languages_spoken =
+      const languages_spoken =
         astrologer.languages_spoken?.map((l) => l.name) || [];
 
-      // Fetch service rates
-      rates = await AstrologerServiceRates.find({
-        astrologer_id: astrologer._id,
-      }).lean();
+      rates = await AstrologerServiceRates.find(
+        { astrologer_id: astrologer._id },
+        {
+          service_type: 1,
+          rate: 1,
+        }
+      ).lean();
 
-      // Fetch followers count
+      rates = await astrologerOfferService.applyOffersOnRates(
+        astrologer._id,
+        rates
+      );
+
+      rates = rates.map((r) => ({
+        service_type: r.service_type,
+        rate: r.rate,
+        final_rate: r.final_rate,
+          is_offer_applied: r.discount_applied,
+
+      }));
+
       followersCount = await FollowRequest.countDocuments({
         astrologer_id: astrologer._id,
       });
-
-      // Fetch rating average
-      const ranking = await AstrologerRanking.findOne({
-        astrologer_id: astrologer._id,
-      }).lean();
+      const ranking = await AstrologerRanking.findOne(
+        { astrologer_id: astrologer._id },
+        { ratings_avg: 1 }
+      ).lean();
       ratingsAvg = ranking?.ratings_avg || 0;
+      astrologer = {
+        _id: astrologer._id,
+        display_name: astrologer.display_name,
+        bio: astrologer.bio,
+        experience_years: astrologer.experience_years,
+        is_online: astrologer.is_online,
+        is_busy: astrologer.is_busy,
+        isChat: astrologer.isChat,
+        isCall: astrologer.isCall,
+        isVideo: astrologer.isVideo,
+        specializations,
+        languages_spoken,
+      };
     }
-
-    // Fetch following count
     const followingCount = await FollowRequest.countDocuments({
       user_id: userId,
     });
@@ -253,7 +268,6 @@ async function fetchCompleteUserProfile(userId) {
     throw error;
   }
 }
-
 async function updateAvailabilityStatusService(userId, statusData) {
   try {
     logger.info(
@@ -314,7 +328,6 @@ async function updateAvailabilityStatusService(userId, statusData) {
     throw error;
   }
 }
-
 async function getAvailabilityStatusService(userId) {
   try {
     const astrologer = await Astrologer.findOne({ user_id: userId }).lean();
