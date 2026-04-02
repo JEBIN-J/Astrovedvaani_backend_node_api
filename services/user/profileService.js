@@ -13,78 +13,6 @@ const {
   getFullNumerology,
 } = require("../kundli/kundliService");
 
-// const completeProfile = async (userId, profileData) => {
-//   logger.info(`Starting profile completion for userId: ${userId}`);
-//   logger.debug(`Raw profileData received: ${JSON.stringify(profileData)}`);
-//   const allowedFields = [
-//     "name",
-//     "email",
-//     "birthDate",
-//     "birthTime",
-//     "birthPlace",
-//     "profilePicture",
-//     "gender",
-//     "relationship_status",
-//     "latitude",
-//     "longitude",
-//     "mobileNumber",
-//     "countryCode",
-//   ];
-//   const updatePayload = {};
-//   for (const field of allowedFields) {
-//     if (Object.prototype.hasOwnProperty.call(profileData, field)) {
-//       updatePayload[field] = profileData[field];
-//     }
-//   }
-//   if (Object.keys(updatePayload).length === 0) {
-//     logger.warn(
-//       `No valid profile fields provided for update by userId: ${userId}`,
-//     );
-//     throw new Error("No valid fields provided for profile update.");
-//   }
-//   logger.info(`Filtered update payload: ${JSON.stringify(updatePayload)}`);
-//   const updatedUser = await User.findOneAndUpdate(
-//     { _id: userId, role: { $ne: Enums.USER.ROLE.AI_ASTROLOGER } },
-//     { $set: updatePayload },
-//     { new: true },
-//   ).lean();
-//   updatePayload.relationshipToOwner = "self";
-
-//   const updatedUserAstrology = await UserAstrology.findOneAndUpdate(
-//     { userId: userId, relationshipToOwner: "self" },
-//     { $set: updatePayload },
-//     { new: true, upsert: true },
-//   ).lean();
-//   logger.info(`Profile successfully updated for userId: ${userId}`);
-//   try {
-//     const kundliBasicKey = CacheService.generateKey(
-//       CacheService.CACHE_PREFIXES.USER_DETAILS,
-//       "kundli-basic",
-//       userId,
-//     );
-//     const kundliDetailsKey = CacheService.generateKey(
-//       CacheService.CACHE_PREFIXES.USER_DETAILS,
-//       "kundli-details",
-//       userId,
-//     );
-//     await CacheService.del(kundliBasicKey);
-//     await CacheService.del(kundliDetailsKey);
-//     logger.info(`Cleared cached Kundli data for userId=${userId}`);
-//   } catch (err) {
-//     logger.error(
-//       `Error clearing cached Kundli data for userId=${userId}:`,
-//       err,
-//     );
-//   }
-//    setImmediate(() => {
-//     try {
-//       performPostProfileTasks(userId);
-//     } catch (err) {
-//       logger.error(`Error in background task for userId=${userId}:`, err);
-//     }
-//   });
-//   return updatedUser;
-// };
 const completeProfile = async (userId, profileData) => {
   logger.info(`Starting profile completion for userId: ${userId}`);
   logger.debug(`Raw profileData received: ${JSON.stringify(profileData)}`);
@@ -179,7 +107,6 @@ const completeProfile = async (userId, profileData) => {
 
   return updatedUser;
 };
-
 const formatDateDDMMYYYY = (date) => {
   if (!date) return null;
   const d = new Date(date);
@@ -188,6 +115,13 @@ const formatDateDDMMYYYY = (date) => {
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
+};
+const TAG_LABELS = {
+  [Enums.USER.TAGS.LOYAL_CUSTOMER]: "Loyal Customer",
+  [Enums.USER.TAGS.HIGH_SPENDER]: "High Spender",
+  [Enums.USER.TAGS.LOW_BALANCE]: "Low Balance",
+  [Enums.USER.TAGS.INACTIVE_USER]: "Inactive User",
+  [Enums.USER.TAGS.NEW_USER]: "New User",
 };
 const getMyProfile = async (userId) => {
   logger.info(`Fetching profile for userId: ${userId}`);
@@ -201,6 +135,7 @@ const getMyProfile = async (userId) => {
   const followersCount = await FollowRequest.countDocuments({
     astrologer_id: userId,
   });
+
   const followingCount = await FollowRequest.countDocuments({
     user_id: userId,
   });
@@ -209,6 +144,12 @@ const getMyProfile = async (userId) => {
     userId,
     relationshipToOwner: "self",
   }).lean();
+
+  let currentTag = TAG_LABELS[Enums.USER.TAGS.NEW_USER];
+
+  if (user.currentTag && user.currentTag.tag) {
+    currentTag = TAG_LABELS[user.currentTag.tag] || TAG_LABELS[Enums.USER.TAGS.NEW_USER];
+  }
 
   const profile = {
     _id: user._id,
@@ -233,6 +174,10 @@ const getMyProfile = async (userId) => {
     myReferralCode: user.myReferralCode || null,
     verificationStatus: user.verificationStatus || null,
     description: user.description || null,
+
+    // ✅ ADD THIS
+    currentTag,
+
     // Astrology details
     isKundli: astrology ? astrology.isKundli : false,
     latitude: astrology ? astrology.latitude : null,

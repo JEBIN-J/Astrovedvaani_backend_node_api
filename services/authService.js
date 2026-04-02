@@ -50,7 +50,6 @@ const generateAuthTokens = (user, deviceId, onlyAccessToken = false) => {
 
   return { accessToken, refreshToken };
 };
-
 const TEST_NUMBERS = {
   "+911234567890": "999999",
   "+919876543210": "1111",
@@ -60,7 +59,6 @@ const TEST_NUMBERS = {
   "+916666666666": "6666",
   "+915555555555": "5555",
 };
-
 const loginByOTP = async (identifier) => {
   const { mobileNumber, email, countryCode } = identifier;
   if (!mobileNumber && !email) {
@@ -93,7 +91,6 @@ const loginByOTP = async (identifier) => {
   logger.info(`OTP generated and send initiated for ${identifierValue}`);
   return { message: "OTP sent successfully" };
 };
-
 const verifyOtp = async (
   identifier,
   otp,
@@ -323,7 +320,7 @@ const loginByPassword = async ({
     );
   }
   const adminOrigins = [
-    "https://admin.astrowala.ai",
+    "https://admin.astrovedvaani.com",
     "http://localhost:3000",
     "http://localhost:3001",
   ];

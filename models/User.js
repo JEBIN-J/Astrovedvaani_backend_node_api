@@ -133,6 +133,39 @@ const userSchema = new Schema(
         return this.role === Enums.USER.ROLE.AI_ASTROLOGER;
       },
     },
+    currentTag: {
+      tag: {
+        type: Number,
+        enum: Object.values(Enums.USER.TAGS),
+        default: Enums.USER.TAGS.NEW_USER
+      },
+      assignedAt: {
+        type: Date,
+        default: Date.now
+      }
+    },
+
+    userTags: [
+      {
+        tag: {
+          type: Number,
+          enum: Object.values(Enums.USER.TAGS),
+          required: true
+        },
+        source: {
+          type: Number,
+          enum: Object.values(Enums.USER.TAG_SOURCE),
+          default: Enums.USER.TAG_SOURCE.SYSTEM
+        },
+        assignedAt: {
+          type: Date,
+          default: Date.now
+        },
+        expiresAt: Date,
+        metadata: Schema.Types.Mixed
+      }
+    ]
+
   },
   {
     timestamps: true,

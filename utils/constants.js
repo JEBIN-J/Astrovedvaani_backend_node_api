@@ -43,6 +43,18 @@ const Enums = {
       LOGOUT: 1006,
       SUPPORT: 1007,
     },
+    TAGS: {
+      LOYAL_CUSTOMER: 350,
+      HIGH_SPENDER: 351,
+      LOW_BALANCE: 352,
+      INACTIVE_USER: 353,
+      NEW_USER: 354,
+    },
+    TAG_SOURCE: {
+      SYSTEM: 450,
+      ADMIN: 451,
+      ML: 452
+    },
   },
 
   // Services Domain
@@ -69,40 +81,6 @@ const Enums = {
       ACCEPTED: 506,
       REJECTED: 507,
     },
-    // CATEGORY: {
-    //   ASTROLOGY: 508,
-    //   TAROT: 509,
-    //   VASTU: 510,
-    //   NUMEROLOGY: 511,
-    //   PALMISTRY: 512,
-    //   GEMOLOGY: 513,
-    //   YOGA: 514,
-    //   MEDITATION: 515,
-    //   HEALTH: 516,
-    //   LOVE: 517,
-    //   CAREER: 518,
-    //   FINANCE: 519,
-    //   SPIRITUALITY: 520,
-    //   EDUCATION: 521,
-    //   RELATIONSHIP: 522,
-    //   CHILD: 523,
-    //   PET: 524,
-    //   TRAVEL: 525,
-    //   HOBBIES: 526,
-    //   EVENTS: 527,
-    // },
-    // Language: {
-    //   ENGLISH: 528,
-    //   HINDI: 529,
-    //   TAMIL: 530,
-    //   TELUGU: 531,
-    //   KANNADA: 532,
-    //   MALAYALAM: 533,
-    //   BENGALI: 534,
-    //   MARATHI: 535,
-    //   GUJARATI: 536,
-    //   PUNJABI: 537
-    // }
   },
 
   // Payment Domain

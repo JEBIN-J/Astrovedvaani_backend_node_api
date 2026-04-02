@@ -55,16 +55,16 @@ class SocketManager {
     registerWalletSocketManager(this);
     registerModerationSocketManager(this);
     this.io.on("connection", (socket) => {
-    if (!socket.user) {
-      logger.error(`[SOCKET] Unauthorized socket connection: ${socket.id}`);
-      socket.emit("auth_error", {
-        message: "Authentication required. Please login again."
-      });
-      setTimeout(() => {
-        socket.disconnect(true);
-      }, 300);
-      return;
-    }
+      if (!socket.user) {
+        logger.error(`[SOCKET] Unauthorized socket connection: ${socket.id}`);
+        socket.emit("auth_error", {
+          message: "Authentication required. Please login again."
+        });
+        setTimeout(() => {
+          socket.disconnect(true);
+        }, 300);
+        return;
+      }
 
       const { userId, role } = socket.user;
       logger.info(`Socket connected: ${socket.id}, userId=${userId}, role=${role}`);
@@ -178,7 +178,6 @@ class SocketManager {
 
     return this.io;
   }
-
   async handleReconnectSessionCheck(userId) {
     for (const [key, timeout] of Array.from(this.disconnectTimeouts.entries())) {
       if (!key.endsWith(`_${userId}`)) continue;
@@ -193,7 +192,6 @@ class SocketManager {
       }
     }
   }
-
   trackConnection(userId, socketId, role) {
     userId = userId.toString();
     if (!this.userSockets.has(userId)) {
@@ -206,7 +204,6 @@ class SocketManager {
       .catch(err => logger.error(`[RECONNECT] Error`, err));
     this.userSockets.get(userId).add(socketId);
   }
-
   cleanup(userId, socketId, role) {
     userId = userId.toString();
     const sockets = this.userSockets.get(userId);
@@ -220,18 +217,15 @@ class SocketManager {
       }
     }
   }
-
   broadcastOnlineLists() {
     this.io.to("users").emit("online_astrologers", Array.from(this.onlineAstrologers));
     this.io.to("astrologers").emit("online_users", Array.from(this.onlineUsers));
     this.io.to("admins").emit("online_users", Array.from(this.onlineUsers));
     this.io.to("admins").emit("online_astrologers", Array.from(this.onlineAstrologers));
   }
-
   getActiveSession(userId) {
     return this.activeSessions.get(userId.toString());
   }
-
   setActiveSession(userId, astrologerId, sessionId) {
     this.activeSessions.set(userId.toString(), {
       astrologerId: astrologerId.toString(),
@@ -243,7 +237,6 @@ class SocketManager {
       sessionId,
     });
   }
-
   clearActiveSession(userId, astrologerId) {
     this.activeSessions.delete(userId.toString());
     this.activeSessions.delete(astrologerId.toString());

@@ -8,10 +8,8 @@ const { getAdminUserId, updateUser } = require("./userService");
 const { getAstrologerDetails } = require("./astrologerService");
 const { handleAstroShareProcessing } = require("./sessionService");
 const walletNotification = require("../../services/socket/walletNotification");
-const {
-  getSessionExtendedCount,
-  clearSessionExtendedCount,
-} = require("../../utils/redis/sessionExtend");
+const {getSessionExtendedCount,clearSessionExtendedCount} = require("../../utils/redis/sessionExtend");
+const tagService = require("../user/tagService");
 
 async function createLedgerEntriesForSession(sessionId) {
   try {
@@ -193,36 +191,25 @@ async function finalizeSession(sessionId, endedBy, forcedEndReason = null) {
     );
     return null;
   }
-
-  const extensionCount = 0; //await getSessionExtendedCount(sessionId); // 0 if never extended
+  const extensionCount = 0;
   logger.info(`[Session] Session extension count: ${extensionCount}`);
-
-  // Calculate adjusted end time
   const adjustedEndTime = new Date(
     session.end_time.getTime() - extensionCount * 60000,
   );
   logger.info(
     `[Session] Adjusted end time (after subtracting extensions): ${adjustedEndTime.toISOString()}`,
   );
-
-  // --- Use actual stored timestamps ---
   const startTime = session.start_time;
-  const endTime = adjustedEndTime || new Date(); // use adjusted endTime
+  const endTime = adjustedEndTime || new Date();
   logger.info(
     `[Session] Start time: ${startTime.toISOString()}, End time for calculation: ${endTime.toISOString()}`,
   );
-
   const actualDurationMs = endTime - startTime;
   const totalConsumedMinutes = Math.ceil(actualDurationMs / 60000);
-  logger.info(
-    `[Session] Actual duration in ms: ${actualDurationMs}, totalConsumedMinutes (rounded): ${totalConsumedMinutes}`,
-  );
-
-  // --- Free session logic ---
-  const freeDuration = session.freeDuration ?? 0; // e.g., 2 minutes
+  logger.info(`[Session] Actual duration in ms: ${actualDurationMs}, totalConsumedMinutes (rounded): ${totalConsumedMinutes}`,);
+  const freeDuration = session.freeDuration ?? 0;
   const freeUsed = Math.min(totalConsumedMinutes, freeDuration);
   const billableMinutes = Math.max(0, totalConsumedMinutes - freeUsed);
-
   logger.info(
     `[Session] Free duration: ${freeDuration}min, Free used: ${freeUsed}min, Billable minutes: ${billableMinutes}min`,
   );
@@ -259,23 +246,17 @@ async function finalizeSession(sessionId, endedBy, forcedEndReason = null) {
   );
 
   // --- Trigger ledger entry asynchronously ---
-  process.nextTick(() => {
-    if (typeof createLedgerEntriesForSession === "function") {
-      createLedgerEntriesForSession(sessionId)
-        .then(() =>
-          logger.info(
-            `[Ledger] Ledger entries created successfully for sessionId=${sessionId}`,
-          ),
-        )
-        .catch((err) =>
-          logger.error(
-            `[Ledger] Error creating ledger entries for sessionId=${sessionId}:`,
-            err,
-          ),
-        );
+  setImmediate(async () => {
+    try {
+      if (typeof createLedgerEntriesForSession === "function") {
+        await createLedgerEntriesForSession(sessionId);
+        logger.info(`[Ledger] Done for sessionId=${sessionId}`);
+      }
+      await tagService.handleSessionCompletion(session.user_id);
+    } catch (err) {
+      logger.error(`[AsyncTasks] Error for sessionId=${sessionId}`, err);
     }
   });
-
   logger.info(`[Session] finalizeSession completed for sessionId=${sessionId}`);
   return {
     session,

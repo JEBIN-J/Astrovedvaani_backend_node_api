@@ -5,8 +5,8 @@ const sendMail = require("../services/communication/emailService").sendMail;
 cron.schedule(
   "0 0 * * *", // daily 12:00 AM
   async () => {
-    logger.info("⏰ Cron Job: Checking Tithi schedules at 12:00 AM...");
-    console.log("✅ Cron job running at 12:00 AM...");
+    logger.info("Cron Job: Checking Tithi schedules at 12:00 AM...");
+    console.log("Cron job running at 12:00 AM...");
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -23,13 +23,13 @@ cron.schedule(
           `Today's Tithi Reminder - ${schedule.tithi}`,
           `Namaste,\n\nToday is ${schedule.tithi}.\nSpecial Tithi: ${
             schedule.specialTithi || "N/A"
-          }.\n\nHave a blessed day! 🙏`,
+          }.\n\nHave a blessed day!`,
         );
 
-        logger.info(`📩 Mail sent to ${emailToSend} for date ${schedule.date}`);
+        logger.info(`Mail sent to ${emailToSend} for date ${schedule.date}`);
       }
     } catch (err) {
-      logger.error("❌ Error in Tithi Cron Job:", err);
+      logger.error("Error in Tithi Cron Job:", err);
     }
   },
   {
