@@ -35,7 +35,7 @@ const runSeeder = async () => {
     // await seedPooja();
     // await normalizeProductPricesSeeder();
     // await migratePoojaPricingSeeder();
-    await fixUserTagData();
+    // await fixUserTagData();
 
     await logger.info("Seeder: All seeding tasks completed successfully.");
   } catch (error) {

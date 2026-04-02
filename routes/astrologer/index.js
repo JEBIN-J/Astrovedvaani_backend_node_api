@@ -14,6 +14,7 @@ const poojaRoutes = require("./poojaBookingRoutes");
 const userRoutes = require("./userRoutes");
 const ledgerRoutes = require("./ledgerRoutes");
 const supportTicketRoutes = require("./astrologerSupportTicket");
+const rateRequestRoutes = require("./rateRequestRoutes");
 router.use("/profile", profileRoutes);
 router.use("/session", sessionRoutes);
 router.use("/pooja-booking", poojaRoutes);
@@ -21,5 +22,7 @@ router.use("/pooja", poojaRoutes);
 router.use("/user", userRoutes);
 router.use("/ledger", ledgerRoutes);
 router.use("/support-ticket", supportTicketRoutes);
+router.use("/rate-requests", rateRequestRoutes);
+
 
 module.exports = router;

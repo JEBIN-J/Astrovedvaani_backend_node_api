@@ -20,6 +20,8 @@ const { registerWalletSocketManager } = require("../services/socket/walletNotifi
 const { setInSession, getInSession } = require("../utils/redis/sessionExtend");
 const { handleDeviceEvents } = require("../services/socket/deviceService");
 const { registerModerationSocketManager } = require("../services/socket/userModerationSocket");
+const { registerSocketManager } = require("../services/socket/realtimeOrPushNotifier");
+
 
 class SocketManager {
   constructor() {
@@ -54,6 +56,7 @@ class SocketManager {
     registerLiveSocketManager(this);
     registerWalletSocketManager(this);
     registerModerationSocketManager(this);
+    registerSocketManager(this);
     this.io.on("connection", (socket) => {
       if (!socket.user) {
         logger.error(`[SOCKET] Unauthorized socket connection: ${socket.id}`);

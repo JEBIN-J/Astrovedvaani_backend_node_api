@@ -42,6 +42,7 @@ const Enums = {
       CONSULTATION: 1005,
       LOGOUT: 1006,
       SUPPORT: 1007,
+      RATE_UPDATES: 1008,
     },
     TAGS: {
       LOYAL_CUSTOMER: 350,
