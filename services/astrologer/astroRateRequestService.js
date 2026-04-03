@@ -3,6 +3,7 @@ const {
   ConflictError,
   NotFoundError
 } = require("../../errors");
+const mongoose = require('mongoose');
 
 const AstrologerServiceRateRequests = require("../../models/AstrologerServiceRateRequests");
 const Enums = require("../../utils/constants");
@@ -80,40 +81,34 @@ const createRequest = async ({
   }
 };
 
-const getRequests = async ({
-  astrologerId,
-  status,
-  serviceType,
-  page = 1,
-  limit = 10
-}) => {
+const getRequests = async ({ astrologerId }) => {
+  const pipeline = [
+    {
+      $match: {
+        astrologer_id: new mongoose.Types.ObjectId(astrologerId)
+      }
+    },
+    {
+      $sort: { createdAt: -1 }
+    },
+    {
+      $group: {
+        _id: "$service_type",
+        doc: { $first: "$$ROOT" }
+      }
+    },
+    {
+      $replaceRoot: { newRoot: "$doc" }
+    },
+    {
+      $sort: { service_type: 1 }
+    }
+  ];
 
-  const query = {
-    astrologer_id: astrologerId
-  };
-
-  if (status !== undefined) query.status = status;
-  if (serviceType !== undefined) query.service_type = serviceType;
-
-  const skip = (page - 1) * limit;
-
-  const [docs, totalDocs] = await Promise.all([
-    AstrologerServiceRateRequests.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit),
-
-    AstrologerServiceRateRequests.countDocuments(query)
-  ]);
+  const docs = await AstrologerServiceRateRequests.aggregate(pipeline);
 
   return {
-    data: docs.map(mapRequest),
-    pagination: buildPaginationResponse({
-      totalDocs,
-      totalPages: Math.ceil(totalDocs / limit),
-      page,
-      limit
-    })
+    data: docs.map(mapRequest)
   };
 };
 

@@ -34,31 +34,19 @@ const createRequest = asyncHandler(async (req, res) => {
 
 const getRequests = asyncHandler(async (req, res) => {
   const userId = req.user._id;
-
   const astrologer = await Astrologer.findOne({ user_id: userId });
-
   if (!astrologer) {
     throw new BadRequestError('Astrologer profile not found');
   }
 
-  let { status, serviceType, page = 1, limit = 10 } = req.query;
-
-  page = parseInt(page);
-  limit = parseInt(limit);
-
-  const result = await Service.getRequests({
-    astrologerId: astrologer._id,
-    status: status != null ? Number(status) : undefined,
-    serviceType: serviceType != null ? Number(serviceType) : undefined,
-    page,
-    limit
+  const data = await Service.getRequests({
+    astrologerId: astrologer._id
   });
 
   return res.status(200).json({
     success: true,
     message: 'Requests fetched successfully',
-    data: result.data,
-    pagination: result.pagination
+    data: data.data
   });
 });
 
