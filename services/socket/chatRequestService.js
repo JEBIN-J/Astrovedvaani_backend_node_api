@@ -46,14 +46,14 @@ function handleChatRequestEvents(socketManager, socket) {
         return callback?.({ success: false, message: 'Chat Feature is Disabled.' });
       }
       const session = await createChatSession({ userId, astrologerUserId: astrologerId });
-      (async () => {
-      try {
-        await kundliService.getCompleteKundliByUserId(userId);
-        logger.info(`[KUNDLI] Prefetch completed for user ${userId}`);
-      } catch (err) {
-        logger.error(`[KUNDLI] Prefetch failed for user ${userId}`, err);
-      }
-    })();
+    //   (async () => {
+    //   try {
+    //     await kundliService.getCompleteKundliByUserId(userId);
+    //     logger.info(`[KUNDLI] Prefetch completed for user ${userId}`);
+    //   } catch (err) {
+    //     logger.error(`[KUNDLI] Prefetch failed for user ${userId}`, err);
+    //   }
+    // })();
       if (!session.success) {
         logger.error(`[SOCKET] chat_request_send failed to create session: ${session.error}`);
         return callback?.({ success: false, message: session.error || 'Unable to create chat session.' });

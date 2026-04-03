@@ -212,6 +212,7 @@ async function fetchCompleteUserProfile(userId) {
         {
           service_type: 1,
           rate: 1,
+          commission_pct: 1
         }
       ).lean();
 
@@ -224,10 +225,9 @@ async function fetchCompleteUserProfile(userId) {
         service_type: r.service_type,
         rate: r.rate,
         final_rate: r.final_rate,
-          is_offer_applied: r.discount_applied,
-
+        is_offer_applied: r.discount_applied,
+        commission_pct: r.commission_pct
       }));
-
       followersCount = await FollowRequest.countDocuments({
         astrologer_id: astrologer._id,
       });

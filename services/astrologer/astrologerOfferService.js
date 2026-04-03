@@ -136,30 +136,20 @@ async function createOrUpdateOffers(userId, offers) {
 }
 async function getOffers(userId) {
   const astrologer_id = await getAstrologerId(userId);
-
   const cacheKey = CacheService.generateKey(OFFER_CACHE_PREFIX, astrologer_id);
-
-  // ✅ Try cache first
   let doc = await CacheService.get(cacheKey);
-
   if (!doc) {
-    // 🔥 Cache miss → DB
     doc = await AstrologerOffer.findOne(
       { astrologer_id },
       { offers: 1 }
     ).lean();
-
-    // Cache even empty
     await CacheService.set(cacheKey, doc || { offers: [] }, OFFER_TTL);
   }
-
   if (!doc) return { offers: [] };
-
   return formatResponse(doc);
 }
 async function deleteOfferByServiceType(userId, serviceType) {
   const astrologer_id = await getAstrologerId(userId);
-
   const result = await AstrologerOffer.updateOne(
     { astrologer_id },
     {
@@ -168,37 +158,28 @@ async function deleteOfferByServiceType(userId, serviceType) {
       },
     }
   );
-
   if (result.matchedCount === 0) {
     throw new NotFoundError("Offers not found");
   }
-
   await CacheService.clearMatchingKeys(ASTROLOGER_CACHE_PREFIX);
-
   const offerCacheKey = CacheService.generateKey(OFFER_CACHE_PREFIX, astrologer_id);
   await CacheService.del(offerCacheKey);
-
   emitAstrologerOfferUpdate(astrologer_id);
 }
 async function deleteAllOffers(userId) {
   const astrologer_id = await getAstrologerId(userId);
-
   const result = await AstrologerOffer.updateOne(
     { astrologer_id },
     {
       $set: { offers: [] },
     }
   );
-
   if (result.matchedCount === 0) {
     throw new NotFoundError("Offers not found");
   }
-
   await CacheService.clearMatchingKeys(ASTROLOGER_CACHE_PREFIX);
-
   const offerCacheKey = CacheService.generateKey(OFFER_CACHE_PREFIX, astrologer_id);
   await CacheService.del(offerCacheKey);
-
   emitAstrologerOfferUpdate(astrologer_id);
 }
 function formatResponse(doc) {
@@ -214,22 +195,20 @@ function formatResponse(doc) {
 
   return { offers };
 }
+
 async function applyOffersOnRates(astrologer_id, rates) {
-  if (!rates || rates.length === 0) return [];
-
+  if (!rates || rates.length === 0) {
+    return [];
+  }
   const cacheKey = CacheService.generateKey(OFFER_CACHE_PREFIX, astrologer_id);
-
   let offerDoc = await CacheService.get(cacheKey);
-
   if (offerDoc === null) {
     offerDoc = await AstrologerOffer.findOne(
       { astrologer_id },
       { offers: 1 }
     ).lean();
-
     await CacheService.set(cacheKey, offerDoc || { offers: [] }, OFFER_TTL);
   }
-
   if (!offerDoc || !offerDoc.offers || offerDoc.offers.length === 0) {
     return rates.map((rate) => ({
       ...rate,
@@ -237,33 +216,25 @@ async function applyOffersOnRates(astrologer_id, rates) {
       discount_applied: false,
     }));
   }
-
   const now = new Date();
-
   const offerMap = new Map();
-
   for (const offer of offerDoc.offers) {
     const isActive =
       offer.is_active === true &&
       offer.start_time <= now &&
       (!offer.end_time || offer.end_time > now);
-
     if (isActive) {
       offerMap.set(offer.service_type, offer);
     }
   }
-
   return rates.map((rate) => {
     const baseRate = Number(rate.rate);
-
     if (isNaN(baseRate)) {
       throw new Error(
         `Invalid rate for service_type=${rate.service_type}`
       );
     }
-
     const offer = offerMap.get(rate.service_type);
-
     if (!offer) {
       return {
         ...rate,
@@ -271,17 +242,13 @@ async function applyOffersOnRates(astrologer_id, rates) {
         discount_applied: false,
       };
     }
-
     let final_rate = baseRate;
-
     if (offer.discount_type === "PERCENTAGE") {
       final_rate = baseRate - (baseRate * offer.discount_value) / 100;
     } else if (offer.discount_type === "FLAT") {
       final_rate = baseRate - offer.discount_value;
     }
-
     final_rate = Math.max(0, Math.round(final_rate));
-
     return {
       ...rate,
       final_rate,

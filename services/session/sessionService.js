@@ -21,12 +21,10 @@ async function createChatSession({ userId, astrologerUserId, mode = Enums.SERVIC
     if (!astrologer || !serviceRate?.rate) {
       throw new Error('Astrologer service rate not configured');
     }
-    // const rate = Number(serviceRate.rate);
-    // if (isNaN(rate) || rate <= 0) {
-    //   throw new Error('Invalid service rate configured');
-    // }
-    // 🔥 Apply offer pricing
+    console.log('serviceRate is ', serviceRate);
+
     const [pricing] = await applyOffersOnRates(astrologer._id, [serviceRate]);
+    console.log('pricing is ', pricing);
 
     if (!pricing) {
       throw new Error('Failed to resolve pricing');
