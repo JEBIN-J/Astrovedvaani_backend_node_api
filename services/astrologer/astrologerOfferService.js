@@ -195,20 +195,17 @@ function formatResponse(doc) {
 
   return { offers };
 }
-
 async function applyOffersOnRates(astrologer_id, rates) {
   if (!rates || rates.length === 0) {
     return [];
   }
-  const cacheKey = CacheService.generateKey(OFFER_CACHE_PREFIX, astrologer_id);
-  let offerDoc = await CacheService.get(cacheKey);
-  if (offerDoc === null) {
-    offerDoc = await AstrologerOffer.findOne(
-      { astrologer_id },
-      { offers: 1 }
-    ).lean();
-    await CacheService.set(cacheKey, offerDoc || { offers: [] }, OFFER_TTL);
-  }
+
+  // 🔴 ALWAYS fetch fresh data (critical path)
+  const offerDoc = await AstrologerOffer.findOne(
+    { astrologer_id },
+    { offers: 1 }
+  ).lean();
+
   if (!offerDoc || !offerDoc.offers || offerDoc.offers.length === 0) {
     return rates.map((rate) => ({
       ...rate,
@@ -216,25 +213,37 @@ async function applyOffersOnRates(astrologer_id, rates) {
       discount_applied: false,
     }));
   }
+
   const now = new Date();
+
+  // ✅ Normalize + filter active offers
   const offerMap = new Map();
+
   for (const offer of offerDoc.offers) {
+    const start = offer.start_time ? new Date(offer.start_time) : null;
+    const end = offer.end_time ? new Date(offer.end_time) : null;
+
     const isActive =
       offer.is_active === true &&
-      offer.start_time <= now &&
-      (!offer.end_time || offer.end_time > now);
+      (!start || start <= now) &&
+      (!end || end > now);
+
     if (isActive) {
       offerMap.set(offer.service_type, offer);
     }
   }
+
   return rates.map((rate) => {
     const baseRate = Number(rate.rate);
+
     if (isNaN(baseRate)) {
       throw new Error(
         `Invalid rate for service_type=${rate.service_type}`
       );
     }
+
     const offer = offerMap.get(rate.service_type);
+
     if (!offer) {
       return {
         ...rate,
@@ -242,13 +251,17 @@ async function applyOffersOnRates(astrologer_id, rates) {
         discount_applied: false,
       };
     }
+
     let final_rate = baseRate;
+
     if (offer.discount_type === "PERCENTAGE") {
       final_rate = baseRate - (baseRate * offer.discount_value) / 100;
     } else if (offer.discount_type === "FLAT") {
       final_rate = baseRate - offer.discount_value;
     }
+
     final_rate = Math.max(0, Math.round(final_rate));
+
     return {
       ...rate,
       final_rate,
@@ -256,7 +269,6 @@ async function applyOffersOnRates(astrologer_id, rates) {
     };
   });
 }
-
 module.exports = {
   createOrUpdateOffers,
   getOffers,
