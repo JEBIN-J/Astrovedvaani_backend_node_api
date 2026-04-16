@@ -70,6 +70,7 @@ exports.updateServiceRate = async (req, res) => {
 
 exports.getLoggedInUserProfile = async (req, res) => {
   try {
+    console.log("hghghghhhghgh");
     const userId = req.user._id;
     const profile = await fetchCompleteUserProfile(userId);
 

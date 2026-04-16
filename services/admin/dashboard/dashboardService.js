@@ -29,6 +29,7 @@ const getDateRanges = () => {
   return { todayStart, yesterdayStart, lastWeekStart, lastMonthStart };
 };
 
+
 exports.getOverview = async () => {
   const dbCounts = await getDbCounts();
   const activeCounts = await getActiveCounts();
@@ -48,21 +49,9 @@ async function getDbCounts() {
     User.countDocuments({ role: Enums.USER.ROLE.ASTROLOGER, isDeleted: false }),
     User.countDocuments({ role: Enums.USER.ROLE.VENDOR, isDeleted: false }),
 
-    User.countDocuments({
-      role: Enums.USER.ROLE.USER,
-      isNewUser: true,
-      isDeleted: false,
-    }),
-    User.countDocuments({
-      role: Enums.USER.ROLE.ASTROLOGER,
-      isNewUser: true,
-      isDeleted: false,
-    }),
-    User.countDocuments({
-      role: Enums.USER.ROLE.VENDOR,
-      isNewUser: true,
-      isDeleted: false,
-    }),
+    User.countDocuments({ role: Enums.USER.ROLE.USER, isNewUser: true, isDeleted: false }),
+    User.countDocuments({ role: Enums.USER.ROLE.ASTROLOGER, isNewUser: true, isDeleted: false }),
+    User.countDocuments({ role: Enums.USER.ROLE.VENDOR, isNewUser: true, isDeleted: false }),
 
     getProductStats(),
   ]);
@@ -75,38 +64,38 @@ async function getDbCounts() {
   };
 }
 async function getActiveCounts() {
-  const [activeUsersRedis, activeAstrosRedis, activeVendorsRedis] =
-    await Promise.all([
-      getActiveCountByRole(Enums.USER.ROLE.USER),
-      getActiveCountByRole(Enums.USER.ROLE.ASTROLOGER),
-      getActiveCountByRole(Enums.USER.ROLE.VENDOR),
-    ]);
+  const [
+    activeUsersRedis,
+    activeAstrosRedis,
+    activeVendorsRedis,
+  ] = await Promise.all([
+    getActiveCountByRole(Enums.USER.ROLE.USER),
+    getActiveCountByRole(Enums.USER.ROLE.ASTROLOGER),
+    getActiveCountByRole(Enums.USER.ROLE.VENDOR),
+  ]);
 
   const activeUsers =
-    typeof activeUsersRedis === "number" && activeUsersRedis > 0
+    activeUsersRedis !== null
       ? activeUsersRedis
       : await User.countDocuments({
           role: Enums.USER.ROLE.USER,
           isActive: true,
-          isDeleted: false,
         });
 
   const activeAstrologers =
-    typeof activeAstrosRedis === "number" && activeAstrosRedis > 0
+    activeAstrosRedis !== null
       ? activeAstrosRedis
       : await User.countDocuments({
           role: Enums.USER.ROLE.ASTROLOGER,
           isActive: true,
-          isDeleted: false,
         });
 
   const activeVendors =
-    typeof activeVendorsRedis === "number" && activeVendorsRedis > 0
+    activeVendorsRedis !== null
       ? activeVendorsRedis
       : await User.countDocuments({
           role: Enums.USER.ROLE.VENDOR,
           isActive: true,
-          isDeleted: false,
         });
 
   return {
@@ -115,7 +104,6 @@ async function getActiveCounts() {
     vendors: activeVendors,
   };
 }
-
 function buildOverviewResponse(db, active) {
   return {
     users: {
@@ -142,6 +130,7 @@ function buildOverviewResponse(db, active) {
     },
   };
 }
+
 exports.getCommunicationSummary = async () => {
   const [consultations, live] = await Promise.all([
     getConsultationSummary(),
@@ -446,26 +435,34 @@ exports.getEarnings = async () => {
 };
 
 const getDateRangesB = () => {
-  const startOfDay = (d) => {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    return x;
-  };
+  const now = new Date();
 
-  const todayStart = startOfDay(new Date());
+  // Convert to IST start of day → then to UTC
+  const startOfDayIST = new Date(
+    now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+  );
+  startOfDayIST.setHours(0, 0, 0, 0);
+
+  // Convert IST start to UTC
+  const todayStart = new Date(startOfDayIST.getTime() - (5.5 * 60 * 60 * 1000));
 
   return {
     todayStart,
+
     yesterdayStart: new Date(todayStart.getTime() - 1 * 86400000),
+
     lastWeekStart: new Date(todayStart.getTime() - 7 * 86400000),
+
     lastMonthStart: new Date(
-      new Date(todayStart).setMonth(todayStart.getMonth() - 1),
+      new Date(todayStart).setMonth(todayStart.getMonth() - 1)
     ),
+
     last6MonthStart: new Date(
-      new Date(todayStart).setMonth(todayStart.getMonth() - 6),
+      new Date(todayStart).setMonth(todayStart.getMonth() - 6)
     ),
+
     lastYearStart: new Date(
-      new Date(todayStart).setFullYear(todayStart.getFullYear() - 1),
+      new Date(todayStart).setFullYear(todayStart.getFullYear() - 1)
     ),
   };
 };
@@ -507,6 +504,8 @@ const getRechargeSummary = async () => {
     lastYearStart,
   } = getDateRangesB();
 
+  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+
   const agg = await Ledger.aggregate([
     {
       $lookup: {
@@ -517,6 +516,7 @@ const getRechargeSummary = async () => {
       },
     },
     { $unwind: "$wallet" },
+
     {
       $lookup: {
         from: "users",
@@ -545,30 +545,45 @@ const getRechargeSummary = async () => {
         lifetime: [
           { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
         ],
+
         lastYear: [
           { $match: { timestamp: { $gte: lastYearStart } } },
           { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
         ],
+
         last6Month: [
           { $match: { timestamp: { $gte: last6MonthStart } } },
           { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
         ],
+
         lastMonth: [
           { $match: { timestamp: { $gte: lastMonthStart } } },
           { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
         ],
+
         lastWeek: [
           { $match: { timestamp: { $gte: lastWeekStart } } },
           { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
         ],
+
         yesterday: [
-          { $match: { timestamp: { $gte: yesterdayStart, $lt: todayStart } } },
+          {
+            $match: {
+              timestamp: { $gte: yesterdayStart, $lt: todayStart },
+            },
+          },
           { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
         ],
+
         today: [
-          { $match: { timestamp: { $gte: todayStart } } },
+          {
+            $match: {
+              timestamp: { $gte: todayStart, $lt: tomorrowStart },
+            },
+          },
           { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
         ],
+
         frequent: [
           { $group: { _id: "$credit_amount", count: { $sum: 1 } } },
           { $sort: { count: -1 } },

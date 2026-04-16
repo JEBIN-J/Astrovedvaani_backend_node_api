@@ -3,13 +3,18 @@ const userService = require("../../services/user/userService");
 const chatService = require("../../services/user/chatService");
 const logger = require("../../utils/logger");
 const asyncHandler = require("../../middlewares/asyncHandler");
-const { checkAstrologerBusy } = require("../../utils/redis/sessionCacheService");
+const {
+  checkAstrologerBusy,
+} = require("../../utils/redis/sessionCacheService");
 const Language = require("../../models/Language");
 const Specialization = require("../../models/Specialization");
 const CacheService = require("../../utils/redis/cacheService");
 const { Types } = require("mongoose");
 const Enums = require("../../utils/constants");
-const { getAllSpecializations, getAllLanguages } = require("../../services/admin/AstrologerSkillsService");
+const {
+  getAllSpecializations,
+  getAllLanguages,
+} = require("../../services/admin/AstrologerSkillsService");
 
 exports.getAstrologers = asyncHandler(async (req, res) => {
   try {
@@ -23,9 +28,9 @@ exports.getAstrologers = asyncHandler(async (req, res) => {
       specializations,
       minRating,
       serviceType,
-      sortPrice,       // asc | desc
-      sortExperience,  // asc | desc
-      sortRating,     // asc | desc
+      sortPrice, // asc | desc
+      sortExperience, // asc | desc
+      sortRating, // asc | desc
       gender,
       is_free,
       search,
@@ -39,7 +44,9 @@ exports.getAstrologers = asyncHandler(async (req, res) => {
         message: "Invalid limit parameter",
       });
     }
-    const targetServiceType = serviceType ? parseInt(serviceType) : Enums.SERVICE.TYPE.CHAT;
+    const targetServiceType = serviceType
+      ? parseInt(serviceType)
+      : Enums.SERVICE.TYPE.CHAT;
     const filters = {
       ...(is_online !== undefined && {
         "astrologer.is_online": is_online === "true",
@@ -52,53 +59,75 @@ exports.getAstrologers = asyncHandler(async (req, res) => {
       }),
       ...(languages && {
         "astrologer.languages_spoken": {
-          $in: languages.split(",").map(id => new Types.ObjectId(id))
+          $in: languages.split(",").map((id) => new Types.ObjectId(id)),
         },
       }),
       ...(specializations && {
         "astrologer.specializations": {
-          $in: specializations.split(",").map(id => new Types.ObjectId(id))
+          $in: specializations.split(",").map((id) => new Types.ObjectId(id)),
         },
       }),
       ...(minRating && { ratings_avg: { $gte: parseFloat(minRating) } }),
-      "service_rates.service_type": targetServiceType,  // Filter by service type
+      "service_rates.service_type": targetServiceType, // Filter by service type
       ...(is_free !== undefined && { is_free: is_free === "true" }),
     };
 
-    const { data: staticAstrologers, pagination } = await userService.fetchAstrologers({
-      limit: parsedLimit,
-      cursor,
-      filters,
-      sortPrice,
-      sortExperience,
-      sortRating,
-      gender,
-      search,
-      userId,
-      targetServiceType,
-    });
-    let cachedSpecializations = await CacheService.get(CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations");
-if (!cachedSpecializations) {
-  cachedSpecializations = await getAllSpecializations({ page: 1, limit: 1000 }); // fetch all for cache
-  await CacheService.set(CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations", cachedSpecializations);
-}
+    const { data: staticAstrologers, pagination } =
+      await userService.fetchAstrologers({
+        limit: parsedLimit,
+        cursor,
+        filters,
+        sortPrice,
+        sortExperience,
+        sortRating,
+        gender,
+        search,
+        userId,
+        targetServiceType,
+      });
+    let cachedSpecializations = await CacheService.get(
+      CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations",
+    );
+    if (!cachedSpecializations) {
+      cachedSpecializations = await getAllSpecializations({
+        page: 1,
+        limit: 1000,
+      }); // fetch all for cache
+      await CacheService.set(
+        CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations",
+        cachedSpecializations,
+      );
+    }
 
-let cachedLanguages = await CacheService.get(CacheService.CACHE_PREFIXES.USERS_LIST + ":languages");
-if (!cachedLanguages) {
-  cachedLanguages = await getAllLanguages({ page: 1, limit: 1000 });
-  await CacheService.set(CacheService.CACHE_PREFIXES.USERS_LIST + ":languages", cachedLanguages);
-}
+    let cachedLanguages = await CacheService.get(
+      CacheService.CACHE_PREFIXES.USERS_LIST + ":languages",
+    );
+    if (!cachedLanguages) {
+      cachedLanguages = await getAllLanguages({ page: 1, limit: 1000 });
+      await CacheService.set(
+        CacheService.CACHE_PREFIXES.USERS_LIST + ":languages",
+        cachedLanguages,
+      );
+    }
     const populatedData = await Promise.all(
       staticAstrologers.map(async (astro) => {
-        const specializationsPop = astro.astrologer.specializations.map(id => {
-          const s = cachedSpecializations?.data?.find(x => x._id.toString() === id.toString());
-          return s ? s.name : null;
-        }).filter(Boolean);
+        const specializationsPop = astro.astrologer.specializations
+          .map((id) => {
+            const s = cachedSpecializations?.data?.find(
+              (x) => x._id.toString() === id.toString(),
+            );
+            return s ? s.name : null;
+          })
+          .filter(Boolean);
 
-        const languagesPop = astro.astrologer.languages_spoken.map(id => {
-          const l = cachedLanguages?.data?.find(x => x._id.toString() === id.toString());
-          return l ? l.name : null;
-        }).filter(Boolean);
+        const languagesPop = astro.astrologer.languages_spoken
+          .map((id) => {
+            const l = cachedLanguages?.data?.find(
+              (x) => x._id.toString() === id.toString(),
+            );
+            return l ? l.name : null;
+          })
+          .filter(Boolean);
 
         const isBusy = await checkAstrologerBusy(astro.astrologer.user_id);
 
@@ -111,7 +140,7 @@ if (!cachedLanguages) {
             is_busy: isBusy,
           },
         };
-      })
+      }),
     );
 
     res.status(200).json({
@@ -134,6 +163,7 @@ if (!cachedLanguages) {
     });
   }
 });
+
 exports.getAstrologerById = async (req, res) => {
   try {
     const { astrologerId } = req.query;
@@ -155,19 +185,31 @@ exports.getAstrologerById = async (req, res) => {
     }
 
     // Load cached languages and specializations
-    const cachedSpecializations = await CacheService.get(CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations");
-    const cachedLanguages = await CacheService.get(CacheService.CACHE_PREFIXES.USERS_LIST + ":languages");
+    const cachedSpecializations = await CacheService.get(
+      CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations",
+    );
+    const cachedLanguages = await CacheService.get(
+      CacheService.CACHE_PREFIXES.USERS_LIST + ":languages",
+    );
 
     // Populate names from cache
-    const specializationsPop = result.astrologer.specializations.map(id => {
-      const s = cachedSpecializations?.data?.find(x => x._id.toString() === id.toString());
-      return s ? s.name : null;
-    }).filter(Boolean);
+    const specializationsPop = result.astrologer.specializations
+      .map((id) => {
+        const s = cachedSpecializations?.data?.find(
+          (x) => x._id.toString() === id.toString(),
+        );
+        return s ? s.name : null;
+      })
+      .filter(Boolean);
 
-    const languagesPop = result.astrologer.languages_spoken.map(id => {
-      const l = cachedLanguages?.data?.find(x => x._id.toString() === id.toString());
-      return l ? l.name : null;
-    }).filter(Boolean);
+    const languagesPop = result.astrologer.languages_spoken
+      .map((id) => {
+        const l = cachedLanguages?.data?.find(
+          (x) => x._id.toString() === id.toString(),
+        );
+        return l ? l.name : null;
+      })
+      .filter(Boolean);
 
     const isBusy = await checkAstrologerBusy(result.astrologer.user_id);
 
@@ -185,7 +227,6 @@ exports.getAstrologerById = async (req, res) => {
       success: true,
       data: populatedResult,
     });
-
   } catch (error) {
     logger.error("Error fetching astrologer by ID:", error);
     return res.status(500).json({
@@ -291,7 +332,7 @@ exports.getChatList = asyncHandler(async (req, res) => {
   const result = await chatService.getChatList(
     userId,
     parseInt(page, 10),
-    parseInt(limit, 10)
+    parseInt(limit, 10),
   );
 
   res.status(200).json({ success: true, ...result });
@@ -306,7 +347,7 @@ exports.getConversation = asyncHandler(async (req, res) => {
     otherUserId,
     sessionId,
     parseInt(page, 10),
-    parseInt(limit, 10)
+    parseInt(limit, 10),
   );
   res.status(200).json({ success: true, ...result });
 });
@@ -317,14 +358,14 @@ exports.globalSearch = asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 10;
 
   if (!query) {
-    throw new BadRequestError('Search query is required');
+    throw new BadRequestError("Search query is required");
   }
 
   const results = await userService.globalSearch(query, page, limit);
 
   res.status(200).json({
     success: true,
-    message: 'Search results fetched successfully',
-    data: results
+    message: "Search results fetched successfully",
+    data: results,
   });
 });

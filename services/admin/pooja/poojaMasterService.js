@@ -105,8 +105,6 @@ exports.updatePooja = async (id, data) => {
     current.gst_percent = Number(updateData.gst_percent || 0);
   }
 
-  /* ================= PRICE UPDATE ================= */
-
   const effectiveSellingPrice =
     selling_price !== undefined ? Number(selling_price) : current.selling_price;
 
@@ -373,71 +371,57 @@ exports.getAllBookings = async ({
   };
 };
 
-exports.assignAstrologer = async ({
-  booking_id,
-  astrologer_user_id,
-  admin_user_id = null,
-}) => {
-  logger.info("[assignAstrologer] Start", { booking_id, astrologer_user_id });
-  if (!mongoose.Types.ObjectId.isValid(booking_id)) {
-    throw new Error("Invalid booking ID.");
+exports.assignAstrologer = async ({ booking_id, astrologer_user_id }) => {
+  if (!booking_id) {
+    throw new BadRequestError("booking_id is required");
   }
-  const astrologer = await Astrologer.findOne({ user_id: astrologer_user_id });
-  if (!astrologer)
-    throw new Error("Astrologer not found for provided user ID.");
+  if (!astrologer_user_id) {
+    throw new BadRequestError("astrologer_user_id is required");
+  }
+  if (!mongoose.Types.ObjectId.isValid(booking_id)) {
+    throw new BadRequestError("Invalid booking_id format");
+  }
+  if (!mongoose.Types.ObjectId.isValid(astrologer_user_id)) {
+    throw new BadRequestError("Invalid astrologer_user_id format");
+  }
+
   const booking = await PoojaBooking.findById(booking_id);
-  if (!booking) throw new Error("Booking not found.");
-  const previousAstrologerId = booking.astrologer_id;
+  if (!booking) {
+    throw new NotFoundError("Booking not found");
+  }
+
+  if (booking.booking_status !== Enums.ORDER.STATUS.PENDING) {
+    throw new ConflictError(
+      "Astrologer can only be assigned when booking is in PENDING status",
+    );
+  }
+
+  const astrologer = await Astrologer.findOne({ user_id: astrologer_user_id });
+  if (!astrologer) {
+    throw new NotFoundError("Astrologer not found");
+  }
+
   const serviceRate = await AstrologerServiceRates.findOne({
     astrologer_id: astrologer._id,
     service_type: Enums.SERVICE.TYPE.POOJA,
   });
-  const commissionPct = serviceRate?.commission_pct || 0;
-  const astroShareAmount = booking.price_snapshot?.final_price
-    ? (booking.price_snapshot.final_price * commissionPct) / 100
-    : 0;
+  if (!serviceRate) {
+    throw new ConflictError("Astrologer service rate not configured for POOJA");
+  }
+
+  const commissionPct = serviceRate.commission_pct;
+
   booking.astrologer_id = astrologer._id;
   booking.commission_pct = commissionPct;
-  booking.astrologer_share_amount = astroShareAmount;
-  await booking.save();
-  logger.info("[assignAstrologer] Astrologer assigned successfully", {
-    booking_id,
-    astrologer_id: astrologer._id,
-  });
-  process.nextTick(async () => {
-    try {
-      if (
-        previousAstrologerId &&
-        previousAstrologerId.toString() !== astrologer._id.toString()
-      ) {
-        const oldAstro =
-          await Astrologer.findById(previousAstrologerId).populate("user_id");
-        if (oldAstro?.user_id) {
-          await notifyAstrologerRemoved({
-            astrologerUserId: oldAstro.user_id,
-            poojaName: booking.pooja_name,
-          });
-        }
-      }
-      await notifyAstrologerAssigned({
-        astrologerUserId: astrologer_user_id,
-        poojaName: booking.pooja_name,
-        scheduledAt: booking.scheduled_at,
-      });
-      await notifyUserPoojaAssigned({
-        userId: booking.user_id,
-        astrologerName: astrologer.display_name,
-        poojaName: booking.pooja_name,
-        scheduledAt: booking.scheduled_at,
-      });
-      logger.info("[assignAstrologer] Notifications sent in background");
-    } catch (emitErr) {
-      logger.error("[assignAstrologer] Background notification failed", {
-        error: emitErr,
-      });
-    }
-  });
 
+  booking.astrologer_share_amount = Number(
+    (
+      ((booking.price_snapshot?.final_price || 0) * commissionPct) /
+      100
+    ).toFixed(2),
+  );
+
+  await booking.save();
   return booking;
 };
 

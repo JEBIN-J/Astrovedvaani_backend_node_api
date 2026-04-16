@@ -93,13 +93,14 @@ async function createOrUpdateAstrologer(userId, profileData) {
         );
       }
     }
-
+    console.log(profileData.profilePicture);
     if (profileData.profilePicture) {
       await User.findByIdAndUpdate(userId, {
         $set: { profilePicture: profileData.profilePicture },
       });
       logger.info(`User profile picture synced | userId=${userId}`);
     }
+    console;
     if (profileData.gender) {
       await User.findByIdAndUpdate(userId, {
         $set: { gender: profileData.gender },
@@ -168,17 +169,19 @@ async function createOrUpdateRate(astrologerId, data) {
 
 async function fetchCompleteUserProfile(userId) {
   try {
-    const user = await User.findById(userId, {
-      name: 1,
-      mobileNumber: 1,
-      countryCode: 1,
-      email: 1,
-      role: 1,
-    }).lean();
+    logger.info(`Fetching complete user profile | userId=${userId}`);
+    const user = await User.findById(userId)
+      .select(
+        "name mobileNumber countryCode email role smallProfilePicture profilePicture gender",
+      )
+      .lean();
 
     if (!user) throw new Error("User not found");
-
-    let astrologer = await Astrologer.findOne(
+    let astrologer = null;
+    let rates = [];
+    let followersCount = 0;
+    let ratingsAvg = 0;
+    const astrologerData = await Astrologer.findOne(
       { user_id: userId },
       {
         display_name: 1,
@@ -191,74 +194,84 @@ async function fetchCompleteUserProfile(userId) {
         isVideo: 1,
         specializations: 1,
         languages_spoken: 1,
-      }
+      },
     )
       .populate("specializations", "name")
       .populate("languages_spoken", "name")
       .lean();
 
-    let rates = [];
-    let followersCount = 0;
-    let ratingsAvg = 0;
-
-    if (astrologer) {
+    if (astrologerData) {
       const specializations =
-        astrologer.specializations?.map((s) => s.name) || [];
-      const languages_spoken =
-        astrologer.languages_spoken?.map((l) => l.name) || [];
+        astrologerData.specializations?.map((s) => s.name) || [];
 
-      rates = await AstrologerServiceRates.find(
-        { astrologer_id: astrologer._id },
+      const languages_spoken =
+        astrologerData.languages_spoken?.map((l) => l.name) || [];
+
+      let rawRates = await AstrologerServiceRates.find(
+        { astrologer_id: astrologerData._id },
         {
           service_type: 1,
           rate: 1,
-          commission_pct: 1
-        }
+          commission_pct: 1,
+        },
       ).lean();
 
-      rates = await astrologerOfferService.applyOffersOnRates(
-        astrologer._id,
-        rates
+      rawRates = await astrologerOfferService.applyOffersOnRates(
+        astrologerData._id,
+        rawRates,
       );
 
-      rates = rates.map((r) => ({
+      rates = rawRates.map((r) => ({
         service_type: r.service_type,
         rate: r.rate,
         final_rate: r.final_rate,
         is_offer_applied: r.discount_applied,
-        commission_pct: r.commission_pct
+        commission_pct: r.commission_pct,
       }));
+
       followersCount = await FollowRequest.countDocuments({
-        astrologer_id: astrologer._id,
+        astrologer_id: astrologerData._id,
       });
+
       const ranking = await AstrologerRanking.findOne(
-        { astrologer_id: astrologer._id },
-        { ratings_avg: 1 }
+        { astrologer_id: astrologerData._id },
+        { ratings_avg: 1 },
       ).lean();
+
       ratingsAvg = ranking?.ratings_avg || 0;
+
       astrologer = {
-        _id: astrologer._id,
-        display_name: astrologer.display_name,
-        bio: astrologer.bio,
-        experience_years: astrologer.experience_years,
-        is_online: astrologer.is_online,
-        is_busy: astrologer.is_busy,
-        isChat: astrologer.isChat,
-        isCall: astrologer.isCall,
-        isVideo: astrologer.isVideo,
+        _id: astrologerData._id,
+        display_name: astrologerData.display_name,
+        bio: astrologerData.bio,
+        experience_years: astrologerData.experience_years,
+        is_online: astrologerData.is_online,
+        is_busy: astrologerData.is_busy,
+        isChat: astrologerData.isChat,
+        isCall: astrologerData.isCall,
+        isVideo: astrologerData.isVideo,
         specializations,
         languages_spoken,
       };
     }
+
     const followingCount = await FollowRequest.countDocuments({
       user_id: userId,
     });
 
     return {
-      user,
+      user: {
+        _id: user._id,
+        name: user.name,
+        mobileNumber: user.mobileNumber,
+        countryCode: user.countryCode,
+        email: user.email,
+        role: user.role,
+        gender: user.gender,
+        profilePicture: user.profilePicture || null,
+      },
       astrologer,
       rates,
-      role: user.role,
       followersCount,
       followingCount,
       ratingsAvg,
