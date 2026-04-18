@@ -104,7 +104,6 @@ async function handleRazorpayRecharge(
     notes: { user_id: userId.toString() },
     payment_capture: 1,
   });
-
   await createLedgerEntry({
     walletId: wallet._id,
     subtotal,

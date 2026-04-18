@@ -61,13 +61,15 @@ async function remove(id) {
 
 async function calculateWithTax(amount, serviceType) {
   const slabs = await getAll();
+
   const applicable = slabs.filter(
     (s) =>
-      s.applicableServices.length === 0 ||
-      s.applicableServices.includes(serviceType)
+      Array.isArray(s.applicableServices) &&
+      s.applicableServices.includes(serviceType),
   );
 
   let totalTax = 0;
+
   applicable.forEach((slab) => {
     totalTax += (amount * slab.rate) / 100;
   });
@@ -79,12 +81,11 @@ async function calculateWithTax(amount, serviceType) {
   };
 }
 
-
 module.exports = {
   getAll,
   getById,
   create,
   update,
   remove,
-  calculateWithTax
+  calculateWithTax,
 };
