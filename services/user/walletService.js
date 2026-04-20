@@ -14,6 +14,10 @@ const {
 } = require("pg-sdk-node");
 const { calculateWithTax } = require("../admin/taxSlabService");
 const { getPhonePeClient } = require("../../config/phonepeClient");
+const TaxSlab = require("../../models/TaxSlab");
+const rechargeCard = require("../../models/rechargeCard");
+const Coupon = require("../../models/Coupan");
+const ApiError = require("../../errors/apiError");
 
 exports.getWalletBalance = async (userId) => {
   logger.info("getWalletBalance: Fetching wallet balance", { userId });
@@ -82,47 +86,120 @@ async function createLedgerEntry({
   return ledger;
 }
 async function handleRazorpayRecharge(
+  provider,
   userId,
-  amount,
-  integration,
+  base_amount,
+  gst_amount,
+  final_amount,
   wallet,
+  couponCode = null,
+  discountAmount = 0,
+  gst_percent = 0,
+  direction,
+  transaction_type,
   bonus = 0,
+  is_applicable = false,
 ) {
-  const { subtotal, tax, total } = await calculateWithTax(
-    amount,
-    Enums.SERVICE.TYPE.WALLET_RECHARGE,
-  );
-  const amountPaise = Math.round(total * 100);
+  console.log("✅ Razorpay Recharge Details", {
+    base_amount,
+    gst_percent,
+    gst_amount,
+    final_amount,
+    bonus,
+    discountAmount,
+  });
+
+  const integration = await ThirdPartyIntegration.findOne({
+    provider,
+    type: Enums.INTEGRATION.TYPE.PAYMENT,
+    is_active: true,
+  });
+
+  if (!integration) {
+    logger.error(
+      `[initiateRecharge] Payment gateway not configured for provider=${provider}`,
+    );
+    throw new Error("Payment gateway not configured");
+  }
+
+  console.log("🔹 Found Razorpay Integration:", integration);
+
   const razorpay = new Razorpay({
     key_id: integration.api_key,
     key_secret: integration.api_secret,
   });
+
+  // ✅ Create Razorpay order
   const order = await razorpay.orders.create({
-    amount: amountPaise,
+    amount: Math.round(final_amount * 100), // paise
     currency: "INR",
     receipt: `wallet_rcg_${Date.now()}`,
-    notes: { user_id: userId.toString() },
-    payment_capture: 1,
+    notes: {
+      user_id: userId.toString(),
+      coupon_code: couponCode || null,
+      discount_amount: discountAmount,
+      gst_percent,
+      gst_amount,
+      base_amount,
+      final_amount,
+      bonus_amount: bonus,
+      // coins_credited: coins, // added
+    },
   });
-  await createLedgerEntry({
-    walletId: wallet._id,
-    subtotal,
-    tax,
-    total,
-    transactionId: order.id,
-    paymentProvider: Enums.PAYMENT.PROVIDER.RAZORPAY,
-    bonusAmount: bonus,
+
+  const gateway_key = integration.api_key;
+
+  const openingBalance = wallet.balance;
+  const closingBalance = wallet.balance;
+
+  const ledger = await WalletLedger.create({
+    wallet_id: wallet._id,
+    transaction_type,
+    direction,
+    amount: base_amount,
+    gst_included: true,
+    gst_percent,
+    credit_amount: base_amount + bonus,
+    final_amount,
+    payment_method: Enums.PAYMENT.METHOD.UPI,
+    payment_provider: Enums.PAYMENT.PROVIDER.RAZORPAY,
+    payment_status: Enums.PAYMENT.STATUS.PENDING,
+    related_entity_id: order.id,
+    related_entity_type: Enums.ENTITY.TYPE.ORDER,
+    metadata: {
+      coupon_code: couponCode || null,
+      discount_amount: discountAmount,
+      gst_amount,
+      original_amount: base_amount,
+      is_applicable,
+    },
+    bonus_amount: bonus,
+    // coins_credited: coins,
+    remarks: `Recharge initiated - waiting for confirmation${
+      couponCode ? ` (Coupon: ${couponCode})` : ""
+    }`,
+    timestamp: new Date(),
+
+    opening_balance: openingBalance,
+    closing_balance: closingBalance,
   });
 
   return {
     success: true,
     provider: "RAZORPAY",
     order_id: order.id,
-    amount: order.amount / 100,
-    currency: order.currency,
-    gateway_key: integration.api_key,
-    bonusAmount: bonus,
-    finalCredit: subtotal + bonus, // total wallet credit
+    currency: "INR",
+    gateway_key,
+    amount_payable: final_amount, // ✅ You pay this (includes GST)
+    base_amount,
+    gst_percent,
+    gst_amount,
+    discount_amount: discountAmount,
+    bonus_amount: bonus,
+    // coins_credited: coins, // new
+    total_wallet_credit: base_amount + bonus, // ✅ You get this in wallet
+    coupon_applied: !!couponCode && is_applicable,
+    ledger_id: ledger._id,
   };
 }
 // async function handlePhonePeRecharge(
@@ -382,51 +459,167 @@ const gatewayHandlers = {
 
 exports.initiateRecharge = async (
   userId,
-  amount,
+  rechargeCardId,
   provider,
-  bonus,
-  platform,
-  redirectUrl,
+  couponCode = null,
+  direction = Enums.TRANSACTION.DIRECTION.CREDIT,
+  transaction_type = Enums.TRANSACTION.TYPE.RECHARGE,
 ) => {
-  logger.info(
-    `[initiateRecharge] Called | userId=${userId}, provider=${provider} and platform ${platform}`,
-  );
-  provider = Number(provider);
-  const integration = await ThirdPartyIntegration.findOne({
-    provider,
-    type: Enums.INTEGRATION.TYPE.PAYMENT,
-    is_active: true,
-  });
-
-  if (!integration) {
-    logger.error(
-      `[initiateRecharge] Payment gateway not configured for provider=${provider}`,
+  try {
+    logger.info(
+      `[initiateRecharge] Called | userId=${userId}, provider=${provider}, rechargeCardId=${rechargeCardId}, couponCode=${couponCode}`,
     );
-    throw new Error("Payment gateway not configured");
-  }
 
-  const wallet = await Wallet.findOne({ user_id: userId });
-  if (!wallet) {
-    logger.error(`[initiateRecharge] Wallet not found for userId=${userId}`);
-    throw new Error("Wallet not found");
-  }
+    provider = Number(provider);
 
-  const handler = gatewayHandlers[provider];
-  if (!handler) {
-    logger.error(`[initiateRecharge] Unsupported provider=${provider}`);
-    throw new Error("Unsupported provider");
-  }
+    // ✅ Wallet
+    const wallet = await Wallet.findOne({ user_id: userId });
+    if (!wallet) throw new ApiError("Wallet not found", 404);
 
-  logger.info(`[initiateRecharge] Invoking handler for provider=${provider}`);
-  return handler(
-    userId,
-    amount,
-    integration,
-    wallet,
-    bonus,
-    platform,
-    redirectUrl,
-  );
+    // ✅ Card
+    const card = await rechargeCard.findById(rechargeCardId);
+    if (!card || !card.is_active)
+      throw new ApiError("Invalid or inactive recharge card", 400);
+
+    const base_amount = card.amount;
+
+    let discountAmount = 0;
+    let bonus = 0;
+    let final_amount = base_amount;
+    let coupon = null;
+
+    // =========================
+    // ✅ COUPON LOGIC
+    // =========================
+    if (couponCode) {
+      if (!card.is_applicable)
+        throw new ApiError("Coupon not allowed on this card", 400);
+
+      coupon = await Coupon.findOne({
+        code: couponCode.toUpperCase(),
+        is_active: true,
+        valid_from: { $lte: new Date() },
+        valid_until: { $gte: new Date() },
+      });
+
+      if (!coupon) throw new ApiError("Invalid coupon", 400);
+
+      if (coupon.usage_limit && coupon.used_count >= coupon.usage_limit)
+        throw new ApiError("Coupon usage limit exceeded", 400);
+
+      const alreadyUsed = await WalletLedger.findOne({
+        "metadata.coupon_code": couponCode.toUpperCase(),
+        wallet_id: wallet._id,
+        payment_status: Enums.PAYMENT.STATUS.PAID,
+      });
+
+      if (alreadyUsed) throw new ApiError(`Coupon already used`, 400);
+
+      if (base_amount < coupon.min_cart_value)
+        throw new ApiError(
+          `Minimum recharge ₹${coupon.min_cart_value} required`,
+          400,
+        );
+
+      let couponValue =
+        coupon.discount_type === "percentage"
+          ? (coupon.discount_value * base_amount) / 100
+          : coupon.discount_value;
+
+      // ❗ FIX: coupon cannot exceed amount
+      couponValue = Math.min(couponValue, base_amount);
+
+      if (coupon.coupon_mode === "OFF") {
+        discountAmount += couponValue;
+        final_amount -= couponValue;
+      } else {
+        bonus += couponValue;
+      }
+    }
+
+    // =========================
+    // ✅ CARD LOGIC
+    // =========================
+    if (card.card_mode === "OFF") {
+      let cardDiscount =
+        card.discount_type === "percentage"
+          ? (card.bonus * base_amount) / 100
+          : card.bonus;
+
+      // ❗ FIX: discount cannot exceed amount
+      cardDiscount = Math.min(cardDiscount, final_amount);
+
+      discountAmount += cardDiscount;
+      final_amount -= cardDiscount;
+    } else if (card.card_mode === "EXTRA") {
+      let cardBonus =
+        card.discount_type === "percentage"
+          ? (card.bonus * base_amount) / 100
+          : card.bonus;
+
+      bonus += cardBonus;
+    }
+
+    // ❗ FINAL SAFETY
+    final_amount = Math.max(final_amount, 0);
+
+    // =========================
+    // ✅ TAX
+    // =========================
+    const taxSlab = await TaxSlab.findOne({
+      isActive: true,
+      taxContext: Enums?.TAX?.CONTEXT?.WALLET,
+    });
+
+    const gst_percent = taxSlab ? taxSlab.rate : 0;
+    const gst_amount = (base_amount * gst_percent) / 100;
+
+    final_amount += gst_amount;
+
+    // ❗ Razorpay ke liye minimum amount
+    if (final_amount <= 0) {
+      throw new ApiError("Final payable amount must be greater than 0", 400);
+    }
+
+    // =========================
+    // ✅ LOG SUMMARY
+    // =========================
+    console.table({
+      base_amount,
+      gst_percent,
+      gst_amount,
+      final_amount,
+      discountAmount,
+      bonus,
+      coupon: coupon?.code || "N/A",
+    });
+
+    // =========================
+    // ✅ RAZORPAY
+    // =========================
+    if (provider === Enums.INTEGRATION.PROVIDER.RAZORPAY) {
+      return await handleRazorpayRecharge(
+        provider,
+        userId,
+        base_amount,
+        gst_amount,
+        final_amount,
+        wallet,
+        couponCode,
+        discountAmount,
+        gst_percent,
+        direction,
+        transaction_type,
+        bonus,
+        card.is_applicable,
+      );
+    }
+
+    throw new ApiError("Unsupported payment provider", 400);
+  } catch (error) {
+    console.error("❌ ERROR in initiateRecharge:", error);
+    throw error;
+  }
 };
 
 exports.confirmRecharge = async (userId, paymentInfo) => {

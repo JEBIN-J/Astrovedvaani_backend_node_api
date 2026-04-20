@@ -13,6 +13,7 @@ const chatController = require("../../controller/user/UserController");
 const coupanController = require("../../controller/admin/coupanController");
 const adminSkillsController = require("../../controller/admin/AstrologerSkillsAndLanguageController");
 const configController = require("../../controller/admin/ServiceController");
+const rechargeCardController = require("../../controller/admin/rechargeCardController");
 const router = express.Router();
 
 router.get("/fetch-astrologers", authMiddleware, userController.getAstrologers);
@@ -110,5 +111,10 @@ router.get(
   "/getConfigByType",
   authMiddleware,
   configController.getConfigByType,
+);
+router.get(
+  "/recharge-card/fetch-all",
+  authMiddleware,
+  rechargeCardController.getAllRechargeCards,
 );
 module.exports = router;

@@ -54,7 +54,7 @@ const Enums = {
     TAG_SOURCE: {
       SYSTEM: 450,
       ADMIN: 451,
-      ML: 452
+      ML: 452,
     },
   },
 
@@ -126,7 +126,12 @@ const Enums = {
       DEBIT: 1001,
     },
   },
-
+  TAX: {
+    CONTEXT: {
+      WALLET: 8000,
+      PRODUCT: 8100,
+    },
+  },
   // Communication Domain
   COMMUNICATION: {
     MESSAGE_TYPE: {

@@ -28,7 +28,7 @@ const ledgerRoutes = require("./ledgerRoutes");
 const serviceRoutes = require("./services");
 const couponRoutes = require("./couponRoutes");
 const rateRequestRoutes = require("./rateRequestRoutes");
-
+const rechargeCardRoutes = require("./rechargeCardRoute");
 const ADMIN = [Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN];
 const ADMIN_VENDOR = [...ADMIN, Enums.USER.ROLE.VENDOR];
 const SUPER_ADMIN = [Enums.USER.ROLE.SUPER_ADMIN];
@@ -49,12 +49,24 @@ router.use("/ls", authorizeRoles(...ADMIN_VENDOR), lsRoutes);
 
 router.use("/ledger", authorizeRoles(...SUPER_ADMIN), ledgerRoutes);
 router.use("/service", authorizeRoles(...SUPER_ADMIN), serviceRoutes);
-router.use("/astrologer-priority", authorizeRoles(...SUPER_ADMIN), astrologerPriorityRoutes);
+router.use(
+  "/astrologer-priority",
+  authorizeRoles(...SUPER_ADMIN),
+  astrologerPriorityRoutes,
+);
 router.use("/meta-seo", authorizeRoles(...SUPER_ADMIN), metaSeoRoutes);
 router.use("/dashboard", authorizeRoles(...SUPER_ADMIN), dashboardRoutes);
 
 router.use("/media-content", authorizeRoles(...ADMIN), mediaContentRoutes);
-router.use("/astrology-service-details", authorizeRoles(...ADMIN), astrologyServiceDetailsRoutes);
+router.use(
+  "/astrology-service-details",
+  authorizeRoles(...ADMIN),
+  astrologyServiceDetailsRoutes,
+);
 router.use("/rate-requests", authorizeRoles(...SUPER_ADMIN), rateRequestRoutes);
-
+router.use(
+  "/recharge-card",
+  authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
+  rechargeCardRoutes,
+);
 module.exports = router;
