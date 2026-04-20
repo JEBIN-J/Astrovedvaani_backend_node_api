@@ -16,6 +16,7 @@ const Astrologer = require("../../models/Astrologer");
 
 const moment = require("moment");
 const { notifyWalletAdjustment } = require("../../schedule/notificationWorker");
+const { BadRequestError } = require("../../errors");
 
 exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
   const wallet = await Wallet.findOne({ user_id: userId });
@@ -606,30 +607,40 @@ exports.getWithdrawalRequests = async ({
 };
 
 async function handleRazorpayPayout(request, wallet, integration) {
-  const astrologer = await Astrologer.findById(request.user._id);
-  if (!astrologer.razorpay_fund_account_id) {
-    throw new Error("Astrologer's fund account not created");
-  }
+  const astrologer = await Astrologer.findOne({
+    user_id: request.user._id,
+  }).lean();
 
-  const razorpay = new Razorpay({
-    key_id: integration.api_key,
-    key_secret: integration.api_secret,
-  });
+  // console.log("astorloger details", astrologer);
+  // if (!astrologer.razorpay_fund_account_id) {
+  //   throw new Error("Astrologer's fund account not created");
+  // }
 
-  const payout = await razorpay.payouts.create({
-    fund_account: astrologer.razorpay_fund_account_id,
-    amount: request.amount * 100,
-    currency: "INR",
-    mode: "IMPS",
-    purpose: "payout",
-    reference_id: `withdraw_${request._id}`,
-    narration: "Astrologer withdrawal",
-  });
+  // console.log("Initiating Razorpay payout", {
+  //   astrologerId: astrologer._id,
+  //   fundAccountId: astrologer.razorpay_fund_account_id,
+  //   amount: request.amount,
+  // });
+
+  // const razorpay = new Razorpay({
+  //   key_id: integration.api_key,
+  //   key_secret: integration.api_secret,
+  // });
+
+  // const payout = await razorpay.payouts.create({
+  //   fund_account: astrologer.razorpay_fund_account_id,
+  //   amount: request.amount * 100,
+  //   currency: "INR",
+  //   mode: "IMPS",
+  //   purpose: "payout",
+  //   reference_id: `withdraw_${request._id}`,
+  //   narration: "Astrologer withdrawal",
+  // });
 
   // mark as completed
   request.status = Enums.SERVICE.STATUS.COMPLETED;
   request.processedAt = new Date();
-  request.external_transaction_id = payout.id;
+  // request.external_transaction_id = payout.id;
   await request.save();
 
   await WalletLedger.create({
@@ -641,7 +652,9 @@ async function handleRazorpayPayout(request, wallet, integration) {
     payment_method: Enums.PAYMENT.METHOD.BANK_TRANSFER,
     payment_provider: Enums.PAYMENT.PROVIDER.RAZORPAY,
     payment_status: Enums.PAYMENT.STATUS.PAID,
-    external_transaction_id: payout.id,
+    opening_balance: wallet.balance + request.amount,
+    closing_balance: wallet.balance,
+    // external_transaction_id: payout.id,
     related_entity_id: request._id,
     related_entity_type: Enums.ENTITY.TYPE.WITHDRAWAL,
     remarks: "Withdrawal approved and transferred to astrologer",
