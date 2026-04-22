@@ -369,6 +369,12 @@ const Enums = {
       TAROT: 1009,
     },
   },
+  TRADITION: {
+    TYPE: {
+      FESTIVAL: 8000,
+      VRAT: 8100,
+    },
+  },
 };
 
 Object.freeze(Enums);

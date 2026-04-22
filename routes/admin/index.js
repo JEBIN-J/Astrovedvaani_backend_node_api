@@ -29,6 +29,7 @@ const serviceRoutes = require("./services");
 const couponRoutes = require("./couponRoutes");
 const rateRequestRoutes = require("./rateRequestRoutes");
 const rechargeCardRoutes = require("./rechargeCardRoute");
+const traditionRoutes = require("./traditionRoute");
 const ADMIN = [Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN];
 const ADMIN_VENDOR = [...ADMIN, Enums.USER.ROLE.VENDOR];
 const SUPER_ADMIN = [Enums.USER.ROLE.SUPER_ADMIN];
@@ -68,5 +69,10 @@ router.use(
   "/recharge-card",
   authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
   rechargeCardRoutes,
+);
+router.use(
+  "/tradition",
+  authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
+  traditionRoutes,
 );
 module.exports = router;

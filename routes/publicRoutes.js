@@ -17,6 +17,7 @@ const {
 
 const MediaContentController = require("../controller/admin/mediaContentController");
 const metaSeoController = require("../controller/admin/metaSeoController");
+const traditionController = require("../controller/user/traditionController");
 router.get("/fetch-static-pages", contentController.getStaticPage);
 router.get("/fetch-carousel", contentController.getBanners);
 router.get("/fetch-testimonials", contentController.getAllTestimonials);
@@ -52,4 +53,9 @@ router.get("/meta/fetch-all", metaSeoController.getMetaList);
 
 router.get("/media-content/fetch-all", MediaContentController.getAllMedia);
 router.get("/media-content/fetch-by-slug", MediaContentController.getMediaById);
+router.get("/tradition/fetch-all", traditionController.getTraditions);
+router.get(
+  "/tradition/fetch-id-or-slug",
+  traditionController.getTraditionBySlugOrId,
+);
 module.exports = router;
