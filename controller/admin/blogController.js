@@ -50,7 +50,7 @@ exports.getBlogs = async (req, res) => {
   try {
     const page = parseInt(req.query.page || 1, 10);
     const limit = parseInt(req.query.limit || 10, 10);
-    const { search, status, category, featured, related_to = 9000 } = req.query;
+    const { search, status, category, featured, related_to } = req.query;
 
     const filter = {};
 
@@ -123,7 +123,9 @@ exports.getBlog = async (req, res) => {
     const blog = await blogService.getBlogById(id, slug);
 
     if (!blog)
-      return res.status(404).json({ success: false, message: "Blog not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Blog not found" });
 
     res.status(200).json({ success: true, data: blog });
   } catch (error) {
@@ -135,7 +137,9 @@ exports.deleteBlog = async (req, res) => {
   try {
     const blog = await blogService.deleteBlog(req.query.id);
     if (!blog)
-      return res.status(404).json({ success: false, message: "Blog not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Blog not found" });
 
     res.status(200).json({
       success: true,

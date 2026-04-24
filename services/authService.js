@@ -361,10 +361,10 @@ const loginByPassword = async ({
 
   // Password check (if needed)
   const isMatch = await bcrypt.compare(password, user.password);
-  // if (!isMatch) {
-  //   logger.warn(`[LOGIN] Incorrect password for user ${user._id}`);
-  //   throw new Error("Invalid credentials");
-  // }
+  if (!isMatch) {
+    logger.warn(`[LOGIN] Incorrect password for user ${user._id}`);
+    throw new Error("Invalid credentials");
+  }
 
   user.lastLogin = new Date();
   await user.save();

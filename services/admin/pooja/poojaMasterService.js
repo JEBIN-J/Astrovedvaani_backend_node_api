@@ -425,6 +425,20 @@ exports.assignAstrologer = async ({ booking_id, astrologer_user_id }) => {
   return booking;
 };
 
+const updatePoojaStatus = {
+  [Enums.ORDER.STATUS.PENDING]: [
+    Enums.ORDER.STATUS.PLACED,
+    Enums.ORDER.STATUS.CONFIRMED,
+    Enums.ORDER.STATUS.CANCELLED,
+  ],
+  [Enums.ORDER.STATUS.PLACED]: [
+    Enums.ORDER.STATUS.CONFIRMED,
+    Enums.ORDER.STATUS.CANCELLED,
+  ],
+  [Enums.ORDER.STATUS.CANCELLED]: [],
+  [Enums.ORDER.STATUS.CONFIRMED]: [],
+};
+
 exports.updateBookingStatus = async ({
   booking_id,
   booking_status,
@@ -435,8 +449,6 @@ exports.updateBookingStatus = async ({
   logger.info("[updateBookingStatus] Start", {
     booking_id,
     booking_status,
-    admin_remarks,
-    scheduled_at,
   });
 
   if (!mongoose.Types.ObjectId.isValid(booking_id)) {
@@ -444,182 +456,196 @@ exports.updateBookingStatus = async ({
   }
 
   const booking = await PoojaBooking.findById(booking_id)
-    .populate("astrologer_id")
-    .populate("user_id");
+    .populate({
+      path: "astrologer_id",
+      populate: { path: "user_id" },
+    })
+    .populate("user_id")
+    .populate("pooja_id", "name");
 
   if (!booking) throw new Error("Booking not found.");
-  if (booking.booking_status !== Enums.ORDER.STATUS.PENDING) {
-    logger.warn(
-      "[updateBookingStatus] Cannot update booking; not in PENDING state",
-      {
-        booking_id: booking._id,
-        current_status: booking.booking_status,
-      },
-    );
-    throw new Error("Booking can only be updated while in PENDING status");
+
+  const currentStatus = booking.booking_status;
+  if (booking_status !== undefined) {
+    //  Already final state
+    if (
+      currentStatus === Enums.ORDER.STATUS.CONFIRMED ||
+      currentStatus === Enums.ORDER.STATUS.CANCELLED
+    ) {
+      throw new Error(
+        `Booking already ${currentStatus}. Status cannot be changed.`,
+      );
+    }
+
+    const allowedTransitions = updatePoojaStatus[currentStatus] || [];
+
+    if (!allowedTransitions.includes(booking_status)) {
+      throw new Error(
+        `Invalid status transition from ${currentStatus} to ${booking_status}`,
+      );
+    }
+
+    if (
+      [Enums.ORDER.STATUS.PLACED, Enums.ORDER.STATUS.COMPLETED].includes(
+        booking_status,
+      )
+    ) {
+      if (!booking.astrologer_id) {
+        throw new Error(
+          "Cannot update status. Please assign astrologer first.",
+        );
+      }
+    }
+
+    booking.booking_status = booking_status;
   }
 
-  const update = {};
-  if (booking_status !== undefined) update.booking_status = booking_status;
-  if (admin_remarks !== undefined) update.admin_remarks = admin_remarks;
+  if (admin_remarks !== undefined) {
+    booking.admin_remarks = admin_remarks;
+  }
+
   if (scheduled_at !== undefined) {
     const date = new Date(scheduled_at);
-    if (isNaN(date.getTime()))
+    if (isNaN(date.getTime())) {
       throw new Error("Invalid scheduled_at datetime.");
-    update.scheduled_at = date;
+    }
+    booking.scheduled_at = date;
   }
 
-  Object.assign(booking, update);
-  await booking.save();
-  logger.info("[updateBookingStatus] Booking updated", {
-    booking_id: booking._id,
-    booking_status: booking.booking_status,
-  });
+  const assignedAstrologer = booking.astrologer_id;
 
-  // --- Update related Order ---
+  if (booking_status === Enums.ORDER.STATUS.CANCELLED) {
+    if (currentStatus === Enums.ORDER.STATUS.PLACED && assignedAstrologer) {
+      booking.astrologer_id = null;
+      booking.commission_pct = 0;
+      booking.astrologer_share_amount = 0;
+    }
+    booking.payment_status = Enums.PAYMENT.STATUS.REFUNDED;
+  }
+
+  await booking.save();
+
   const order = await Order.findOne({
     order_type: Enums.ORDER.TYPE.POOJA,
     reference_id: booking._id,
   });
 
-  if (order) {
-    order.tracking_status = booking_status;
+  if (order && booking_status !== undefined) {
+    order.tracking_status = booking.booking_status;
     await order.save();
-    logger.info("[updateBookingStatus] Order updated", {
-      order_id: order._id,
-      tracking_status: order.tracking_status,
-    });
-  } else {
-    logger.warn("[updateBookingStatus] No Order found for booking", {
-      booking_id: booking._id,
-    });
   }
 
-  // --- Heavy stuff in background ---
   process.nextTick(async () => {
     try {
-      logger.info("[updateBookingStatus-bg] Starting wallet/ledger flow", {
-        booking_id,
-        booking_status,
-      });
-
-      const adminUserId = admin_user_id || (await getAdminUserId());
+      const adminUserId = admin_user_id || (await getSuperAdminUserId());
       const adminWallet = await Wallet.findOne({ user_id: adminUserId });
+      if (!adminWallet) return;
+
       const bookingUserId = booking.user_id?._id || booking.user_id;
       const userWallet = await Wallet.findOne({ user_id: bookingUserId });
+
       const amount = booking.price_snapshot?.final_price ?? 0;
       const timestamp = new Date();
 
-      // --- Cancelled (Refund User) ---
       if (booking_status === Enums.ORDER.STATUS.CANCELLED) {
-        if (adminWallet && userWallet) {
-          adminWallet.balance = Number(
-            (adminWallet.balance - amount).toFixed(2),
-          );
-          userWallet.balance = Number((userWallet.balance + amount).toFixed(2));
-          await Promise.all([adminWallet.save(), userWallet.save()]);
-          await WalletLedger.create([
-            {
-              wallet_id: adminWallet._id,
-              user_id: adminUserId,
-              transaction_type: Enums.TRANSACTION.TYPE.POOJA_REFUND,
-              direction: Enums.TRANSACTION.DIRECTION.DEBIT,
-              amount,
-              final_amount: adminWallet.balance,
-              remarks: `Refund for cancelled booking ${booking._id}`,
-              timestamp,
-            },
-            {
-              wallet_id: userWallet._id,
-              user_id: bookingUserId,
-              transaction_type: Enums.TRANSACTION.TYPE.POOJA_REFUND,
-              direction: Enums.TRANSACTION.DIRECTION.CREDIT,
-              amount,
-              final_amount: userWallet.balance,
-              remarks: `Refund received for cancelled booking ${booking._id}`,
-              timestamp,
-            },
-          ]);
-          logger.info("[updateBookingStatus-bg] Refund processed", {
-            booking_id: booking._id,
+        if (!userWallet || amount <= 0) return;
+
+        const adminOpeningBalance = adminWallet.balance;
+        const userOpeningBalance = userWallet.balance;
+
+        adminWallet.balance = Number((adminWallet.balance - amount).toFixed(2));
+        userWallet.balance = Number((userWallet.balance + amount).toFixed(2));
+
+        await Promise.all([adminWallet.save(), userWallet.save()]);
+
+        await WalletLedger.create([
+          {
+            wallet_id: adminWallet._id,
+            user_id: adminUserId,
+            transaction_type: Enums.TRANSACTION.TYPE.POOJA,
+            direction: Enums.TRANSACTION.DIRECTION.DEBIT,
+            opening_balance: adminOpeningBalance,
+            payment_status: Enums.PAYMENT.STATUS.REFUNDED,
             amount,
-          });
-        }
-      }
-
-      // --- Completed (Commission to Astrologer) ---
-      else if (booking_status === Enums.ORDER.STATUS.COMPLETED) {
+            final_amount: amount,
+            closing_balance: adminWallet.balance,
+            remarks: `Refund for cancelled booking ${booking._id}`,
+            timestamp,
+          },
+          {
+            wallet_id: userWallet._id,
+            user_id: bookingUserId,
+            transaction_type: Enums.TRANSACTION.TYPE.POOJA,
+            direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+            opening_balance: userOpeningBalance,
+            payment_status: Enums.PAYMENT.STATUS.REFUNDED,
+            amount,
+            final_amount: amount,
+            closing_balance: userWallet.balance,
+            remarks: `Refund received for booking ${booking._id}`,
+            timestamp,
+          },
+        ]);
+      } else if (booking_status === Enums.ORDER.STATUS.COMPLETED) {
         const astrologer = booking.astrologer_id;
-        if (astrologer && astrologer.user_id) {
-          const astroUserId = astrologer.user_id._id || astrologer.user_id;
-          const astrologerWallet = await Wallet.findOne({
+        if (!astrologer?.user_id) return;
+
+        const astroUserId = astrologer.user_id._id || astrologer.user_id;
+        const astrologerWallet = await Wallet.findOne({
+          user_id: astroUserId,
+        });
+
+        if (!astrologerWallet) return;
+
+        const commission = booking.astrologer_share_amount ?? 0;
+        if (commission <= 0) return;
+
+        const adminOpeningBalance = adminWallet.balance;
+        const astroOpeningBalance = astrologerWallet.balance;
+
+        adminWallet.balance = Number(
+          (adminWallet.balance - commission).toFixed(2),
+        );
+        astrologerWallet.balance = Number(
+          (astrologerWallet.balance + commission).toFixed(2),
+        );
+
+        await Promise.all([adminWallet.save(), astrologerWallet.save()]);
+
+        await WalletLedger.create([
+          {
+            wallet_id: adminWallet._id,
+            user_id: adminUserId,
+            direction: Enums.TRANSACTION.DIRECTION.DEBIT,
+            opening_balance: adminOpeningBalance,
+            amount: commission,
+            closing_balance: adminWallet.balance,
+            remarks: `Commission payout for booking ${booking._id}`,
+            timestamp,
+          },
+          {
+            wallet_id: astrologerWallet._id,
             user_id: astroUserId,
-          });
-          const commission = booking.astrologer_share_amount ?? 0;
-
-          if (astrologerWallet && commission > 0) {
-            adminWallet.balance = Number(
-              (adminWallet.balance - commission).toFixed(2),
-            );
-            astrologerWallet.balance = Number(
-              (astrologerWallet.balance + commission).toFixed(2),
-            );
-            await Promise.all([adminWallet.save(), astrologerWallet.save()]);
-            await WalletLedger.create([
-              {
-                wallet_id: adminWallet._id,
-                user_id: adminUserId,
-                transaction_type: Enums.TRANSACTION.TYPE.POOJA_COMMISSION,
-                direction: Enums.TRANSACTION.DIRECTION.DEBIT,
-                amount: commission,
-                final_amount: adminWallet.balance,
-                remarks: `Commission payout for booking ${booking._id}`,
-                timestamp,
-              },
-              {
-                wallet_id: astrologerWallet._id,
-                user_id: astroUserId,
-                transaction_type: Enums.TRANSACTION.TYPE.POOJA_COMMISSION,
-                direction: Enums.TRANSACTION.DIRECTION.CREDIT,
-                amount: commission,
-                final_amount: astrologerWallet.balance,
-                remarks: `Commission received for booking ${booking._id}`,
-                timestamp,
-              },
-            ]);
-            logger.info("[updateBookingStatus-bg] Commission processed", {
-              booking_id: booking._id,
-              commission,
-            });
-
-            // Notify astrologer
-            await notifyAstrologerPoojaConfirmed({
-              astrologerUserId: astroUserId,
-              poojaName: booking.pooja_name,
-              scheduledAt: booking.scheduled_at,
-              amount: commission,
-            });
-          }
-        }
+            direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+            opening_balance: astroOpeningBalance,
+            amount: commission,
+            closing_balance: astrologerWallet.balance,
+            remarks: `Commission received for booking ${booking._id}`,
+            timestamp,
+          },
+        ]);
       }
 
-      // --- Emit socket/push event ---
       await emitBookingStatusUpdate({
         bookingId: booking._id,
         userId: bookingUserId,
-        astrologerUserId: booking.astrologer_id?.user_id,
+        astrologerUserId: assignedAstrologer,
         status: booking.booking_status,
         scheduledAt: booking.scheduled_at,
-        adminUserId: admin_user_id,
-      });
-      logger.info("[updateBookingStatus-bg] Booking status event emitted", {
-        bookingId: booking._id,
+        adminUserId,
       });
     } catch (err) {
-      logger.error("[updateBookingStatus-bg] Error in background flow", {
-        booking_id,
-        error: err,
-      });
+      logger.error("[updateBookingStatus-bg] Error", err);
     }
   });
 
