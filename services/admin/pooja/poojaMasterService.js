@@ -19,31 +19,38 @@ const {
   notifyAstrologerAssigned,
   notifyUserPoojaAssigned,
   notifyAstrologerPoojaConfirmed,
+  notifyAstrologerPoojaCancelled,
 } = require("../../notification/notifyService");
 const { getAdminUserId } = require("../../session/userService");
 const Wallet = require("../../../models/Wallet");
 const Order = require("../../../models/Order");
+const { emitWalletUpdate } = require("../../socket/walletNotification");
+const { BadRequestError } = require("../../../errors");
 
-function normalizePoojaPricing({ selling_price, discount }) {
+function normalizePoojaPricing({ selling_price, discount, gstRate }) {
   selling_price = Number(selling_price || 0);
   discount = Number(discount || 0);
   if (selling_price <= 0) {
     throw new Error("selling_price must be > 0");
   }
-  if (discount < 0 || discount > 100) {
-    throw new Error("discount must be between 0 and 100");
+  if (discount < 0 || discount >= 100) {
+    throw new Error("discount must be between 0 and 99");
   }
   const base_price =
     discount > 0
-      ? Number((selling_price * (1 + discount / 100)).toFixed(2))
-      : 0;
+      ? Number((selling_price / (1 - discount / 100)).toFixed(2))
+      : Number(selling_price.toFixed(2));
+
+  const final_price = Number((selling_price * (1 + gstRate / 100)).toFixed(2));
+
   return {
-    selling_price,
+    selling_price: Number(selling_price.toFixed(2)),
     base_price,
     discount,
-    final_price: selling_price,
+    final_price,
   };
 }
+
 exports.createPooja = async (data) => {
   const { selling_price, discount, slug, ...poojaData } = data;
 
@@ -53,6 +60,7 @@ exports.createPooja = async (data) => {
   const pricing = normalizePoojaPricing({
     selling_price,
     discount,
+    gstRate: poojaData?.gst_percent,
   });
 
   Object.assign(poojaData, pricing);
@@ -61,26 +69,10 @@ exports.createPooja = async (data) => {
   return await pooja.save();
 };
 exports.updatePooja = async (id, data) => {
-  const { selling_price, discount, slug, ...updateData } = data;
-
+  const { selling_price, discount, gst_percent, slug, ...updateData } = data;
+  console.log("gst", gst_percent);
   const current = await PoojaMaster.findById(id);
   if (!current) throw new Error("Pooja not found");
-
-  if ("image_url" in updateData) {
-    const imageToCheck = updateData.image_url;
-
-    if (!imageToCheck || String(imageToCheck).trim() === "") {
-      throw new Error("Image is required to update pooja");
-    }
-  }
-  if ("selling_price" in data) {
-    const sp = Number(selling_price);
-
-    if (!sp || isNaN(sp) || sp <= 0) {
-      throw new Error("Selling price must be greater than 0");
-    }
-  }
-
   if ("name" in updateData) {
     current.name = updateData.name;
     current.slug = slugify(updateData.name, {
@@ -88,52 +80,45 @@ exports.updatePooja = async (id, data) => {
       strict: true,
     });
   }
-
   if ("description" in updateData) {
     current.description = updateData.description;
   }
-
   if ("image_url" in updateData) {
     current.image_url = updateData.image_url;
   }
-
   if ("is_active" in updateData) {
     current.is_active = updateData.is_active;
   }
-
-  if ("gst_percent" in updateData) {
-    current.gst_percent = Number(updateData.gst_percent || 0);
+  if (gst_percent !== undefined) {
+    current.gst_percent = Number(gst_percent);
   }
-
   const effectiveSellingPrice =
     selling_price !== undefined ? Number(selling_price) : current.selling_price;
-
   const effectiveDiscount =
     discount !== undefined ? Number(discount) : current.discount;
-
+  const effectiveGst =
+    gst_percent !== undefined ? Number(gst_percent) : current.gst_percent;
   if (selling_price !== undefined || discount !== undefined) {
     const pricing = normalizePoojaPricing({
       selling_price: effectiveSellingPrice,
       discount: effectiveDiscount,
+      gstRate: effectiveGst,
     });
-
     current.selling_price = pricing.selling_price;
     current.base_price = pricing.base_price;
     current.discount = pricing.discount;
     current.final_price = pricing.final_price;
-  }
 
+    console.log("current", current);
+  }
   return await current.save();
 };
-
 exports.getPoojaById = async (id) => {
   return await PoojaMaster.findById(id);
 };
-
 exports.deletePooja = async (id) => {
   return await PoojaMaster.findByIdAndDelete(id);
 };
-
 exports.togglePoojaStatus = async (id) => {
   console.log(`toggle-id ${id}`);
   const pooja = await PoojaMaster.findById(id);
@@ -142,7 +127,6 @@ exports.togglePoojaStatus = async (id) => {
   pooja.is_active = !pooja.is_active;
   return await pooja.save();
 };
-
 exports.getPoojas = async ({ page = 1, limit = 10, search = "" }) => {
   const skip = (page - 1) * limit;
 
@@ -151,7 +135,7 @@ exports.getPoojas = async ({ page = 1, limit = 10, search = "" }) => {
   const [poojas, totalDocs] = await Promise.all([
     PoojaMaster.find(query)
       .select(
-        "name slug description image_url base_price gst_percent discount final_price selling_price is_active createdAt",
+        "name slug description image_url base_price selling_price gst_percent discount final_price is_active createdAt",
       )
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -168,7 +152,6 @@ exports.getPoojas = async ({ page = 1, limit = 10, search = "" }) => {
     limit,
   };
 };
-
 exports.getAllBookings = async ({
   page = 1,
   limit = 10,
@@ -178,265 +161,270 @@ exports.getAllBookings = async ({
   is_astrologer_assigned,
   user_id,
   astrologer_id,
+
+  booking_start_date,
+  booking_end_date,
+  pooja_start_date,
+  pooja_end_date,
 }) => {
   const skip = (page - 1) * limit;
+
   const match = {};
+
+  // ✅ Basic filters
   if (booking_status) match.booking_status = parseInt(booking_status);
   if (payment_status) match.payment_status = parseInt(payment_status);
+
+  if (user_id) match.user_id = new mongoose.Types.ObjectId(user_id);
+  if (astrologer_id)
+    match.astrologer_id = new mongoose.Types.ObjectId(astrologer_id);
+
   if (is_astrologer_assigned === "true") {
     match.astrologer_id = { $ne: null };
   } else if (is_astrologer_assigned === "false") {
     match.astrologer_id = null;
   }
-  if (user_id) match.user_id = user_id;
-  if (astrologer_id) match.astrologer_id = astrologer_id;
-  if (search) {
-    match.$or = [
-      { special_notes: { $regex: search, $options: "i" } },
-      { admin_remarks: { $regex: search, $options: "i" } },
-    ];
+
+  // ✅ Booking date filter (scheduled_at)
+  if (booking_start_date || booking_end_date) {
+    match.scheduled_at = {};
+
+    if (booking_start_date) {
+      const start = new Date(booking_start_date);
+      start.setHours(0, 0, 0, 0); // start of day
+      match.scheduled_at.$gte = start;
+    }
+
+    if (booking_end_date) {
+      const end = new Date(booking_end_date);
+      end.setHours(23, 59, 59, 999); // ✅ end of day
+      match.scheduled_at.$lte = end;
+    }
   }
-  logger.info("[getAllBookings] Fetching bookings with match:", match);
-  const [bookings, totalDocs] = await Promise.all([
-    PoojaBooking.find(match)
-      .populate({
-        path: "user_id",
-        select: "name email profilePicture birthDate birthTime birthPlace",
-      })
-      .populate({
-        path: "pooja_id",
-        select: "name slug image_url",
-      })
-      .populate({
-        path: "astrologer_id",
-        select:
-          "display_name bio specializations languages_spoken experience_years is_online is_busy is_premium verification_status user_id",
-        populate: [
-          { path: "specializations", select: "name" },
-          { path: "languages_spoken", select: "name" },
-        ],
-      })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    PoojaBooking.countDocuments(match),
-  ]);
-  const userIds = bookings.map((b) => b.user_id?._id).filter(Boolean);
-  const addresses = await Address.find({
-    user_id: { $in: userIds },
-    is_default: true,
-    is_active: true,
-  }).lean();
-  const addressMap = {};
-  for (const addr of addresses) {
-    addressMap[addr.user_id.toString()] = {
-      name: addr.name,
-      phone: addr.phone,
-      line1: addr.line1,
-      line2: addr.line2,
-      city: addr.city,
-      state: addr.state,
-      pincode: addr.pincode,
-      country: addr.country,
-    };
+
+  // ✅ Pooja date filter (createdAt)
+  if (pooja_start_date || pooja_end_date) {
+    match.createdAt = {};
+
+    if (pooja_start_date) {
+      const start = new Date(pooja_start_date);
+      start.setHours(0, 0, 0, 0);
+      match.createdAt.$gte = start;
+    }
+
+    if (pooja_end_date) {
+      const end = new Date(pooja_end_date);
+      end.setHours(23, 59, 59, 999); // ✅ end of day
+      match.createdAt.$lte = end;
+    }
   }
-  const enrichedBookings = await Promise.all(
-    bookings.map(async (booking, index) => {
-      const user = booking.user_id;
-      const userIdStr = user?._id?.toString();
-      const astrologerUserId = booking.astrologer_id?.user_id;
-      const finalPrice =
-        booking.price_snapshot?.final_price || booking.total_amount || 0;
-      logger.info(`[Booking ${index}] Booking ID: ${booking._id}`);
-      logger.info(`[Booking ${index}] Final Price: ${finalPrice}`);
-      logger.info(`[Booking ${index}] Astrologer User ID: ${astrologerUserId}`);
-      let expected_user_debit = null;
-      let expected_astrologer_credit = null;
-      let expected_admin_earning = null;
-      let actual_user_debit = null;
-      let actual_astrologer_credit = null;
-      let actual_admin_earning = null;
-      if (finalPrice > 0 && astrologerUserId) {
-        try {
-          const { serviceRate } = await getAstrologerDetails(astrologerUserId, {
-            service_type: Enums.SERVICE.TYPE.POOJA,
-          });
 
-          logger.info(
-            `[Booking ${index}] Fetched serviceRate: ${JSON.stringify(
-              serviceRate,
-            )}`,
-          );
+  // 🔥 AGGREGATION PIPELINE
+  const pipeline = [
+    { $match: match },
 
-          const commissionPercent = serviceRate?.commission_pct ?? 0;
-          logger.info(
-            `[Booking ${index}] Commission Percent: ${commissionPercent}`,
-          );
+    // ✅ Join user
+    {
+      $lookup: {
+        from: "users",
+        localField: "user_id",
+        foreignField: "_id",
+        as: "user",
+      },
+    },
+    { $unwind: "$user" },
 
-          expected_astrologer_credit = Math.round(
-            (commissionPercent / 100) * finalPrice,
-          );
-          expected_admin_earning = finalPrice - expected_astrologer_credit;
-          expected_user_debit = finalPrice;
+    // ✅ Join pooja
+    {
+      $lookup: {
+        from: "poojamasters",
+        localField: "pooja_id",
+        foreignField: "_id",
+        as: "pooja",
+      },
+    },
+    { $unwind: "$pooja" },
 
-          const ledgerEntries = await WalletLedger.find({
-            related_entity: booking._id,
-            transaction_type: Enums.TRANSACTION.TYPE.POOJA,
-          }).lean();
+    // ✅ Join astrologer
+    {
+      $lookup: {
+        from: "astrologers",
+        localField: "astrologer_id",
+        foreignField: "_id",
+        as: "astrologer",
+      },
+    },
+    {
+      $unwind: {
+        path: "$astrologer",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
 
-          logger.info(
-            `[Booking ${index}] Found ${ledgerEntries.length} ledger entries`,
-          );
+    // ✅ Pooja date filter (pooja createdAt)
+    // ...(pooja_start_date || pooja_end_date
+    //   ? [
+    //       {
+    //         $match: {
+    //           "pooja.createdAt": {
+    //             ...(pooja_start_date && {
+    //               $gte: new Date(pooja_start_date),
+    //             }),
+    //             ...(pooja_end_date && {
+    //               $lte: new Date(pooja_end_date),
+    //             }),
+    //           },
+    //         },
+    //       },
+    //     ]
+    //   : []),
 
-          for (const entry of ledgerEntries) {
-            if (entry.direction === Enums.TRANSACTION.DIRECTION.DEBIT) {
-              actual_user_debit = (actual_user_debit || 0) + entry.amount;
-            } else if (entry.direction === Enums.TRANSACTION.DIRECTION.CREDIT) {
-              if (entry.remarks?.includes("Astrologer share")) {
-                actual_astrologer_credit =
-                  (actual_astrologer_credit || 0) + entry.amount;
-              } else if (entry.remarks?.includes("Admin share")) {
-                actual_admin_earning =
-                  (actual_admin_earning || 0) + entry.amount;
-              }
-            }
-          }
-        } catch (error) {
-          logger.error(
-            `[Booking ${index}] Error fetching service rate or processing ledger:`,
-            error,
-          );
-        }
-      } else {
-        logger.info(
-          `[Booking ${index}] Skipping commission calc: price = ${finalPrice}, astrologerUserId = ${astrologerUserId}`,
-        );
-      }
-      const feedback = await getFeedBackBySourceId(booking._id);
-      return {
-        ...booking,
-        payment_method: booking.payment_method || null,
-        user: user
-          ? {
-              _id: user._id,
-              name: user.name,
-              email: user.email,
-              profilePicture: user.profilePicture,
-              birthDate: user.birthDate,
-              birthTime: user.birthTime,
-              birthPlace: user.birthPlace,
-              address: addressMap[userIdStr] || null,
-            }
-          : null,
-        pooja: booking.pooja_id || null,
-        astrologer: booking.astrologer_id
-          ? {
-              _id: booking.astrologer_id._id,
-              display_name: booking.astrologer_id.display_name,
-              bio: booking.astrologer_id.bio,
-              specializations:
-                booking.astrologer_id.specializations?.map((s) => s.name) || [],
-              languages_spoken:
-                booking.astrologer_id.languages_spoken?.map((l) => l.name) ||
-                [],
-              experience_years: booking.astrologer_id.experience_years,
-              is_online: booking.astrologer_id.is_online,
-              is_busy: booking.astrologer_id.is_busy,
-              is_premium: booking.astrologer_id.is_premium,
-              verification_status: booking.astrologer_id.verification_status,
-            }
-          : null,
-        expected_user_debit,
-        expected_astrologer_credit,
-        expected_admin_earning,
-        actual_user_debit,
-        actual_astrologer_credit,
-        actual_admin_earning,
-        user_id: undefined,
-        pooja_id: undefined,
-        astrologer_id: undefined,
-        rating: feedback?.rating ?? null,
-        review: feedback?.review ?? null,
-      };
-    }),
-  );
+    // ✅ SEARCH (IMPORTANT)
+    ...(search
+      ? [
+          {
+            $match: {
+              $or: [
+                { "user.name": { $regex: search, $options: "i" } },
+                { "pooja.name": { $regex: search, $options: "i" } },
+                {
+                  "astrologer.display_name": {
+                    $regex: search,
+                    $options: "i",
+                  },
+                },
+              ],
+            },
+          },
+        ]
+      : []),
+
+    // ✅ SORT
+    { $sort: { createdAt: -1 } },
+
+    // ✅ FACET for pagination
+    {
+      $facet: {
+        bookings: [{ $skip: skip }, { $limit: limit }],
+        totalDocs: [{ $count: "count" }],
+      },
+    },
+  ];
+
+  const result = await PoojaBooking.aggregate(pipeline);
+
+  const bookings = result[0]?.bookings || [];
+  const totalDocs = result[0]?.totalDocs[0]?.count || 0;
 
   return {
-    bookings: enrichedBookings,
+    bookings,
     totalDocs,
     totalPages: Math.ceil(totalDocs / limit),
     page,
     limit,
   };
 };
-
-exports.assignAstrologer = async ({ booking_id, astrologer_user_id }) => {
-  if (!booking_id) {
-    throw new BadRequestError("booking_id is required");
-  }
-  if (!astrologer_user_id) {
-    throw new BadRequestError("astrologer_user_id is required");
-  }
+exports.assignAstrologer = async ({
+  booking_id,
+  astrologer_user_id,
+  admin_user_id = null,
+}) => {
+  logger.info("[assignAstrologer] Start", { booking_id, astrologer_user_id });
   if (!mongoose.Types.ObjectId.isValid(booking_id)) {
-    throw new BadRequestError("Invalid booking_id format");
+    throw new Error("Invalid booking ID.");
   }
-  if (!mongoose.Types.ObjectId.isValid(astrologer_user_id)) {
-    throw new BadRequestError("Invalid astrologer_user_id format");
-  }
-
-  const booking = await PoojaBooking.findById(booking_id);
-  if (!booking) {
-    throw new NotFoundError("Booking not found");
-  }
-
-  if (booking.booking_status !== Enums.ORDER.STATUS.PENDING) {
-    throw new ConflictError(
-      "Astrologer can only be assigned when booking is in PENDING status",
+  const astrologer = await Astrologer.findOne({ user_id: astrologer_user_id });
+  if (!astrologer)
+    throw new Error("Astrologer not found for provided user ID.");
+  const booking = await PoojaBooking.findById(booking_id).populate(
+    "pooja_id",
+    "name",
+  );
+  if (!booking) throw new Error("Booking not found.");
+  if (
+    booking.booking_status === Enums.ORDER.STATUS.CANCELLED ||
+    booking.booking_status === Enums.ORDER.STATUS.COMPLETED
+  ) {
+    const message = {
+      [Enums.ORDER.STATUS.CANCELLED]: "Cancelled",
+      [Enums.ORDER.STATUS.COMPLETED]: "Completed",
+    };
+    throw new BadRequestError(
+      `Booking already ${message[booking.booking_status]}. astrologer can not be assigned.`,
     );
   }
-
-  const astrologer = await Astrologer.findOne({ user_id: astrologer_user_id });
-  if (!astrologer) {
-    throw new NotFoundError("Astrologer not found");
-  }
-
+  const previousAstrologerId = booking.astrologer_id;
   const serviceRate = await AstrologerServiceRates.findOne({
     astrologer_id: astrologer._id,
     service_type: Enums.SERVICE.TYPE.POOJA,
   });
-  if (!serviceRate) {
-    throw new ConflictError("Astrologer service rate not configured for POOJA");
-  }
-
-  const commissionPct = serviceRate.commission_pct;
-
+  const commissionPct = serviceRate?.commission_pct || 0;
+  const astroShareAmount = booking.price_snapshot?.final_price
+    ? (booking.price_snapshot.final_price * commissionPct) / 100
+    : 0;
   booking.astrologer_id = astrologer._id;
   booking.commission_pct = commissionPct;
-
-  booking.astrologer_share_amount = Number(
-    (
-      ((booking.price_snapshot?.final_price || 0) * commissionPct) /
-      100
-    ).toFixed(2),
-  );
-
+  booking.astrologer_share_amount = astroShareAmount;
+  booking.booking_status = Enums.ORDER.STATUS.PLACED;
   await booking.save();
+  logger.info("[assignAstrologer] Astrologer assigned successfully", {
+    booking_id,
+    astrologer_id: astrologer._id,
+  });
+
+  const poojaName = booking.pooja_id?.name || "Pooja";
+  process.nextTick(async () => {
+    try {
+      if (
+        previousAstrologerId &&
+        previousAstrologerId.toString() !== astrologer._id.toString()
+      ) {
+        const oldAstro =
+          await Astrologer.findById(previousAstrologerId).populate("user_id");
+        if (oldAstro?.user_id) {
+          await notifyAstrologerRemoved({
+            astrologerUserId: oldAstro.user_id,
+            poojaName,
+          });
+        }
+      }
+      await notifyAstrologerAssigned({
+        astrologerUserId: astrologer_user_id,
+        poojaName,
+        scheduledAt: booking.scheduled_at,
+      });
+      await notifyUserPoojaAssigned({
+        userId: booking.user_id,
+        astrologerName: astrologer.display_name,
+        poojaName,
+        scheduledAt: booking.scheduled_at,
+      });
+      logger.info("[assignAstrologer] Notifications sent in background");
+    } catch (emitErr) {
+      logger.error("[assignAstrologer] Background notification failed", {
+        error: emitErr,
+      });
+    }
+  });
+
   return booking;
 };
+
+function getStatusKey(object, value) {
+  return Object.keys(object).find((key) => object[key] === value);
+}
 
 const updatePoojaStatus = {
   [Enums.ORDER.STATUS.PENDING]: [
     Enums.ORDER.STATUS.PLACED,
-    Enums.ORDER.STATUS.CONFIRMED,
     Enums.ORDER.STATUS.CANCELLED,
   ],
   [Enums.ORDER.STATUS.PLACED]: [
-    Enums.ORDER.STATUS.CONFIRMED,
+    Enums.ORDER.STATUS.COMPLETED,
     Enums.ORDER.STATUS.CANCELLED,
   ],
   [Enums.ORDER.STATUS.CANCELLED]: [],
-  [Enums.ORDER.STATUS.CONFIRMED]: [],
+  [Enums.ORDER.STATUS.COMPLETED]: [],
 };
 
 exports.updateBookingStatus = async ({
@@ -465,13 +453,16 @@ exports.updateBookingStatus = async ({
 
   if (!booking) throw new Error("Booking not found.");
 
-  const currentStatus = booking.booking_status;
+  let currentStatus = booking.booking_status;
+
+  // ================= STATUS TRANSITION VALIDATION =================
   if (booking_status !== undefined) {
-    //  Already final state
     if (
-      currentStatus === Enums.ORDER.STATUS.CONFIRMED ||
+      currentStatus === Enums.ORDER.STATUS.COMPLETED ||
       currentStatus === Enums.ORDER.STATUS.CANCELLED
     ) {
+      currentStatus =
+        getStatusKey(Enums.ORDER.STATUS, currentStatus) || currentStatus;
       throw new Error(
         `Booking already ${currentStatus}. Status cannot be changed.`,
       );
@@ -480,21 +471,13 @@ exports.updateBookingStatus = async ({
     const allowedTransitions = updatePoojaStatus[currentStatus] || [];
 
     if (!allowedTransitions.includes(booking_status)) {
+      currentStatus =
+        getStatusKey(Enums.ORDER.STATUS, currentStatus) || currentStatus;
+      let attemptedStatus =
+        getStatusKey(Enums.ORDER.STATUS, booking_status) || booking_status;
       throw new Error(
-        `Invalid status transition from ${currentStatus} to ${booking_status}`,
+        `Invalid status transition from ${currentStatus} to ${attemptedStatus}`,
       );
-    }
-
-    if (
-      [Enums.ORDER.STATUS.PLACED, Enums.ORDER.STATUS.COMPLETED].includes(
-        booking_status,
-      )
-    ) {
-      if (!booking.astrologer_id) {
-        throw new Error(
-          "Cannot update status. Please assign astrologer first.",
-        );
-      }
     }
 
     booking.booking_status = booking_status;
@@ -512,9 +495,12 @@ exports.updateBookingStatus = async ({
     booking.scheduled_at = date;
   }
 
+  // ===== STORE ASTROLOGER BEFORE CANCELLATION (important) =====
   const assignedAstrologer = booking.astrologer_id;
 
+  // ================= CANCEL LOGIC =================
   if (booking_status === Enums.ORDER.STATUS.CANCELLED) {
+    // If astrologer was assigned (PLACED case)
     if (currentStatus === Enums.ORDER.STATUS.PLACED && assignedAstrologer) {
       booking.astrologer_id = null;
       booking.commission_pct = 0;
@@ -525,6 +511,7 @@ exports.updateBookingStatus = async ({
 
   await booking.save();
 
+  // ================= UPDATE ORDER =================
   const order = await Order.findOne({
     order_type: Enums.ORDER.TYPE.POOJA,
     reference_id: booking._id,
@@ -535,9 +522,10 @@ exports.updateBookingStatus = async ({
     await order.save();
   }
 
+  // ================= BACKGROUND OPERATIONS =================
   process.nextTick(async () => {
     try {
-      const adminUserId = admin_user_id || (await getSuperAdminUserId());
+      const adminUserId = admin_user_id || (await getAdminUserId());
       const adminWallet = await Wallet.findOne({ user_id: adminUserId });
       if (!adminWallet) return;
 
@@ -547,6 +535,9 @@ exports.updateBookingStatus = async ({
       const amount = booking.price_snapshot?.final_price ?? 0;
       const timestamp = new Date();
 
+      // =========================================================
+      // CANCELLED → REFUND USER
+      // =========================================================
       if (booking_status === Enums.ORDER.STATUS.CANCELLED) {
         if (!userWallet || amount <= 0) return;
 
@@ -582,11 +573,39 @@ exports.updateBookingStatus = async ({
             amount,
             final_amount: amount,
             closing_balance: userWallet.balance,
-            remarks: `Refund received for booking ${booking._id}`,
+            remarks: `Refund received for cancelled booking ${booking._id}`,
             timestamp,
           },
         ]);
-      } else if (booking_status === Enums.ORDER.STATUS.COMPLETED) {
+
+        // ================= Notify astrologer if PLACED =================
+        if (currentStatus === Enums.ORDER.STATUS.PLACED && assignedAstrologer) {
+          const astro =
+            await Astrologer.findById(assignedAstrologer).populate("user_id");
+
+          if (astro?.user_id) {
+            await notifyAstrologerPoojaCancelled({
+              astrologerUserId: astro.user_id,
+              poojaName: booking.pooja_id?.name || "Pooja",
+              scheduledAt: booking.scheduled_at,
+            });
+          }
+        }
+
+        emitWalletUpdate(
+          bookingUserId,
+          amount,
+          userOpeningBalance,
+          userWallet.balance,
+          "success",
+          "booking",
+        );
+      }
+
+      // =========================================================
+      // COMPLETED → PAY ASTROLOGER
+      // =========================================================
+      else if (booking_status === Enums.ORDER.STATUS.COMPLETED) {
         const astrologer = booking.astrologer_id;
         if (!astrologer?.user_id) return;
 
@@ -616,9 +635,11 @@ exports.updateBookingStatus = async ({
           {
             wallet_id: adminWallet._id,
             user_id: adminUserId,
+            transaction_type: Enums.TRANSACTION.TYPE.POOJA,
             direction: Enums.TRANSACTION.DIRECTION.DEBIT,
             opening_balance: adminOpeningBalance,
             amount: commission,
+            final_amount: commission,
             closing_balance: adminWallet.balance,
             remarks: `Commission payout for booking ${booking._id}`,
             timestamp,
@@ -626,9 +647,11 @@ exports.updateBookingStatus = async ({
           {
             wallet_id: astrologerWallet._id,
             user_id: astroUserId,
+            transaction_type: Enums.TRANSACTION.TYPE.POOJA_COMMISSION,
             direction: Enums.TRANSACTION.DIRECTION.CREDIT,
             opening_balance: astroOpeningBalance,
             amount: commission,
+            final_amount: commission,
             closing_balance: astrologerWallet.balance,
             remarks: `Commission received for booking ${booking._id}`,
             timestamp,

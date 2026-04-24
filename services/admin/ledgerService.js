@@ -16,70 +16,75 @@ const Astrologer = require("../../models/Astrologer");
 
 const moment = require("moment");
 const { notifyWalletAdjustment } = require("../../schedule/notificationWorker");
-const { BadRequestError } = require("../../errors");
+const { BadRequestError, NotFoundError } = require("../../errors");
+const { emitWalletUpdate } = require("../socket/walletNotification");
+
+// ✅ Build UTC date range safely
+const buildUTCDateRange = (startDate, endDate) => {
+  if (!startDate && !endDate) return null;
+
+  const range = {};
+
+  if (startDate) {
+    const start = new Date(`${startDate}T00:00:00.000Z`);
+    if (!isNaN(start)) range.$gte = start;
+  }
+
+  if (endDate) {
+    const end = new Date(`${endDate}T23:59:59.999Z`);
+    if (!isNaN(end)) range.$lte = end;
+  }
+
+  return Object.keys(range).length ? range : null;
+};
 
 exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
   const wallet = await Wallet.findOne({ user_id: userId });
 
   if (!wallet) {
-    logger.warn("No wallet found for user", { userId });
-    return { bookings: [], total: 0 };
+    return {
+      bookings: [],
+      total: 0,
+      total_credit_amount: 0,
+      total_debit_amount: 0,
+    };
   }
 
   const query = { wallet_id: wallet._id };
 
-  // Flexible date filter
-  let startDate = filters.startDate;
-  let endDate = filters.endDate;
-  const today = new Date();
-
-  if (!startDate && endDate) startDate = moment(today).format("DD/MM/YYYY");
-  if (!endDate && startDate) endDate = moment(today).format("DD/MM/YYYY");
-
-  if (startDate || endDate) {
-    const timestamp = {};
-    if (startDate) {
-      const [d, m, y] = startDate.split("/");
-      const start = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
-      if (!isNaN(start)) timestamp.$gte = start;
-    }
-    if (endDate) {
-      const [d, m, y] = endDate.split("/");
-      const end = new Date(`${y}-${m}-${d}T23:59:59.999Z`);
-      if (!isNaN(end)) timestamp.$lte = end;
-    }
-    if (Object.keys(timestamp).length) query.timestamp = timestamp;
+  // ✅ UTC SAFE DATE FILTER
+  const dateRange = buildUTCDateRange(filters.startDate, filters.endDate);
+  if (dateRange) {
+    query.timestamp = dateRange;
   }
 
-  // Other optional filters
-  if (filters.transaction_type)
-    query.transaction_type = parseInt(filters.transaction_type);
-  if (filters.direction) query.direction = parseInt(filters.direction);
-  if (filters.payment_status)
-    query.payment_status = parseInt(filters.payment_status);
-  if (filters.payment_method)
-    query.payment_method = parseInt(filters.payment_method);
-  if (filters.payment_provider)
-    query.payment_provider = parseInt(filters.payment_provider);
+  // ✅ SAFE NUMERIC FILTERS (0 supported)
+  if (filters.transaction_type !== undefined)
+    query.transaction_type = Number(filters.transaction_type);
+
+  if (filters.direction !== undefined)
+    query.direction = Number(filters.direction);
+
+  if (filters.payment_status !== undefined)
+    query.payment_status = Number(filters.payment_status);
+
+  if (filters.payment_method !== undefined)
+    query.payment_method = Number(filters.payment_method);
+
+  if (filters.payment_provider !== undefined)
+    query.payment_provider = Number(filters.payment_provider);
+
   if (filters.related_entity_type)
     query.related_entity_type = filters.related_entity_type;
+
   if (filters.external_transaction_id)
     query.external_transaction_id = filters.external_transaction_id;
+
   if (filters.order_id) query.order_id = filters.order_id;
 
   const skip = (page - 1) * limit;
 
-  logger.info("Fetching user ledger for admin view", {
-    userId,
-    walletId: wallet._id,
-    filters,
-    query,
-    page,
-    limit,
-    skip,
-  });
-
-  const [bookings, total] = await Promise.all([
+  const [bookings, total, totals] = await Promise.all([
     WalletLedger.find(query)
       .sort({ timestamp: -1 })
       .skip(skip)
@@ -87,9 +92,41 @@ exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
       .lean(),
 
     WalletLedger.countDocuments(query),
+
+    WalletLedger.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          total_credit_amount: {
+            $sum: {
+              $cond: [
+                { $eq: ["$direction", Enums.TRANSACTION.DIRECTION.CREDIT] },
+                "$final_amount",
+                0,
+              ],
+            },
+          },
+          total_debit_amount: {
+            $sum: {
+              $cond: [
+                { $eq: ["$direction", Enums.TRANSACTION.DIRECTION.DEBIT] },
+                "$final_amount",
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]),
   ]);
 
-  return { bookings, total };
+  return {
+    bookings,
+    total,
+    total_credit_amount: totals[0]?.total_credit_amount || 0,
+    total_debit_amount: totals[0]?.total_debit_amount || 0,
+  };
 };
 
 async function getSessionAnalytics(dateFilter = {}) {
@@ -766,7 +803,7 @@ exports.adjustWalletBalance = async ({
     closing_balance: closingBalance,
 
     payment_method: Enums.PAYMENT.METHOD.WALLET,
-    payment_provider: Enums.PAYMENT.PROVIDER.astrovedvanni,
+    payment_provider: Enums.PAYMENT.PROVIDER.LOYALASTRO,
     payment_status: Enums.PAYMENT.STATUS.PAID,
     metadata: {
       performed_by: performedBy,
@@ -783,6 +820,14 @@ exports.adjustWalletBalance = async ({
   });
   /* ---------------- PUSH NOTIFICATION ---------------- */
   try {
+    emitWalletUpdate(
+      userId,
+      amount,
+      openingBalance,
+      closingBalance,
+      "success",
+      "recharge",
+    );
     await notifyWalletAdjustment({
       userId,
       amount: Math.abs(amount),
