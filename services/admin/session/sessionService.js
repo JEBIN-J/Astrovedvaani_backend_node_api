@@ -1,30 +1,25 @@
-const ConsultationSession = require('../../../models/ConsultationSession');
-const WalletLedger = require('../../../models/Ledger');
-const { buildPaginationResponse } = require('../../../utils/pagination');
-const mongoose = require('mongoose');
-const Enums = require('../../../utils/constants');
-const { getAstrologerDetails } = require('../../session/astrologerService');
-const { getFeedBackBySourceId } = require('../feedBackService');
-
+const ConsultationSession = require("../../../models/ConsultationSession");
+const WalletLedger = require("../../../models/Ledger");
+const { buildPaginationResponse } = require("../../../utils/pagination");
+const mongoose = require("mongoose");
+const Enums = require("../../../utils/constants");
+const { getAstrologerDetails } = require("../../session/astrologerService");
+const { getFeedBackBySourceId } = require("../feedBackService");
+const { NotFoundError, BadRequestError } = require("../../../errors");
+const ChatMessage = require("../../../models/Chat");
 function sanitizeUser(user) {
   if (!user) return null;
 
-  const {
-    devices,
-    fcmToken,
-    apiKeys,
-    birthTime,
-    birthPlace,
-    ...safeUser
-  } = user;
+  const { devices, fcmToken, apiKeys, birthTime, birthPlace, ...safeUser } =
+    user;
 
   if (apiKeys && Array.isArray(apiKeys)) {
-    safeUser.apiKeys = apiKeys.map(key => ({
+    safeUser.apiKeys = apiKeys.map((key) => ({
       key: key.key,
       name: key.name,
       createdAt: key.createdAt,
       lastUsed: key.lastUsed,
-      isActive: key.isActive
+      isActive: key.isActive,
     }));
   }
 
@@ -50,7 +45,10 @@ exports.getConsultationSessions = async (filters) => {
     query.user_id = user_id;
   }
 
-  if (astrologer_user_id && mongoose.Types.ObjectId.isValid(astrologer_user_id)) {
+  if (
+    astrologer_user_id &&
+    mongoose.Types.ObjectId.isValid(astrologer_user_id)
+  ) {
     query.astrologer_user_id = astrologer_user_id;
   }
 
@@ -73,8 +71,8 @@ exports.getConsultationSessions = async (filters) => {
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const [rawSessions, totalDocs] = await Promise.all([
     ConsultationSession.find(query)
-      .populate({ path: 'user_id' })
-      .populate({ path: 'astrologer_id' })
+      .populate({ path: "user_id" })
+      .populate({ path: "astrologer_id" })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
@@ -91,12 +89,15 @@ exports.getConsultationSessions = async (filters) => {
       let actual_astrologer_credit = null;
       let actual_admin_earning = null;
       if (!isFree && session.total_amount && session.astrologer_user_id) {
-        const { serviceRate } = await getAstrologerDetails(session.astrologer_user_id);
+        const { serviceRate } = await getAstrologerDetails(
+          session.astrologer_user_id,
+        );
         const commissionPercent = serviceRate?.commission_pct ?? 0;
         expected_astrologer_credit = Math.round(
-          (commissionPercent / 100) * session.total_amount
+          (commissionPercent / 100) * session.total_amount,
         );
-        expected_admin_earning = session.total_amount - expected_astrologer_credit;
+        expected_admin_earning =
+          session.total_amount - expected_astrologer_credit;
         expected_user_debit = session.total_amount;
         const ledgerEntries = await WalletLedger.find({
           related_entity: session._id,
@@ -106,9 +107,10 @@ exports.getConsultationSessions = async (filters) => {
           if (entry.direction === Enums.TRANSACTION.DIRECTION.DEBIT) {
             actual_user_debit = (actual_user_debit || 0) + entry.amount;
           } else if (entry.direction === Enums.TRANSACTION.DIRECTION.CREDIT) {
-            if (entry.remarks?.includes('Astrologer share')) {
-              actual_astrologer_credit = (actual_astrologer_credit || 0) + entry.amount;
-            } else if (entry.remarks?.includes('Admin share')) {
+            if (entry.remarks?.includes("Astrologer share")) {
+              actual_astrologer_credit =
+                (actual_astrologer_credit || 0) + entry.amount;
+            } else if (entry.remarks?.includes("Admin share")) {
               actual_admin_earning = (actual_admin_earning || 0) + entry.amount;
             }
           }
@@ -128,7 +130,7 @@ exports.getConsultationSessions = async (filters) => {
         rating: feedback?.rating ?? null,
         review: feedback?.review ?? null,
       };
-    })
+    }),
   );
 
   sessions.forEach((session) => {
@@ -146,5 +148,61 @@ exports.getConsultationSessions = async (filters) => {
   return {
     sessions,
     pagination,
+  };
+};
+exports.fetchMessages = async ({
+  session_id,
+  message_type,
+  status,
+  from,
+  to,
+  page,
+  limit,
+}) => {
+  if (!mongoose.Types.ObjectId.isValid(session_id)) {
+    throw new BadRequestError("Invalid session_id");
+  }
+  const session = await ConsultationSession.findById(session_id)
+    .select("_id mode")
+    .lean();
+  if (!session) {
+    throw new NotFoundError("Consultation session not found");
+  }
+  if (session.mode !== Enums.SERVICE.TYPE.CHAT) {
+    throw new BadRequestError("Messages are allowed only for CHAT sessions");
+  }
+  const filter = { session_id: new mongoose.Types.ObjectId(session_id) };
+  if (message_type !== undefined) filter.message_type = Number(message_type);
+  if (status !== undefined) filter.status = Number(status);
+  if (from || to) {
+    filter.createdAt = {};
+    if (from) filter.createdAt.$gte = new Date(from);
+    if (to) filter.createdAt.$lte = new Date(to);
+  }
+  const skip = (page - 1) * limit;
+  const [messages, totalDocs] = await Promise.all([
+    ChatMessage.find(filter)
+      .select(
+        "sender_id receiver_id message_type content is_read read_at status createdAt",
+      )
+      .sort({ createdAt: 1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("sender_id", "_id name role")
+      .populate("receiver_id", "_id name role")
+      .lean(),
+    ChatMessage.countDocuments(filter),
+  ]);
+  if (!messages.length) {
+    throw new NotFoundError("No chat messages found for this session");
+  }
+  return {
+    data: messages,
+    pagination: buildPaginationResponse({
+      totalDocs,
+      totalPages: Math.ceil(totalDocs / limit),
+      page,
+      limit,
+    }),
   };
 };

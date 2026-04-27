@@ -24,6 +24,7 @@ const User = require("../../models/User");
 const { setInSession } = require("../../utils/redis/sessionExtend");
 const fs = require("fs");
 const path = require("path");
+const Astrologer = require("../../models/Astrologer");
 const soundConfigPath = path.join(__dirname, "../public/soundConfig.json");
 
 const serviceValidationMap = {
@@ -118,9 +119,12 @@ function registerAgoraCallHandlers(socketManager, socket) {
             await saveUser(userId, user);
           }
         }
+        const astrologer = await Astrologer.findOne({
+          user_id: astrologerId,
+        }).lean();
         const payload = {
           from: userId,
-          name: user?.name || "",
+          name: astrologer?.display_name || "",
           profilePicture: user?.profilePicture || "",
           sessionId: session.session_id,
           chatId: session.chat_id,
@@ -317,16 +321,16 @@ function registerAgoraCallHandlers(socketManager, socket) {
       });
 
       await updateSession(sessionId, {
-      ...updatedSession.toObject(),
-      agora: {
-        channelName,
-        userUid,
-        astroUid,
-        userToken,
-        astroToken,
-        mode: updatedSession.mode
-      }
-    });
+        ...updatedSession.toObject(),
+        agora: {
+          channelName,
+          userUid,
+          astroUid,
+          userToken,
+          astroToken,
+          mode: updatedSession.mode,
+        },
+      });
       await CacheService.markAstrologerBusy(userId, sessionId);
       socketManager.setActiveSession(updatedSession.user_id, userId, sessionId);
 
@@ -373,12 +377,14 @@ function registerAgoraCallHandlers(socketManager, socket) {
       // Fetch the active sound URL (global, as per your config setup)
       const soundUrl = getActiveSoundUrl();
       logger.debug(`[SOCKET] Active sound fetched`, { soundUrl });
-
+      const astrologerProfile = await Astrologer.findOne({
+        user_id: updatedSession.astrologer_user_id,
+      }).lean();
       // 🔍 Step 5: Payloads
       const userPayload = {
         sessionId: updatedSession._id,
         channelName,
-        name: astrologer?.name || "",
+        name: astrologerProfile?.display_name || "",
         profilePicture: astrologer?.profilePicture || "",
         userToken,
         userUid,

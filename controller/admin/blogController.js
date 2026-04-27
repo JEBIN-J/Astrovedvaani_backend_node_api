@@ -17,7 +17,9 @@ exports.addBlog = async (req, res) => {
       ? await blogService.updateBlog(id, data)
       : await blogService.createBlog(data);
 
-    res.status(id ? 200 : 201).json({ success: true, data: blog });
+    res
+      .status(id ? 200 : 201)
+      .json({ success: true, data: blog, message: "Blog added successfully" });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -40,7 +42,13 @@ exports.updateBlog = async (req, res) => {
       ? await blogService.updateBlog(id, data)
       : await blogService.createBlog(data);
 
-    res.status(id ? 200 : 201).json({ success: true, data: blog });
+    res
+      .status(id ? 200 : 201)
+      .json({
+        success: true,
+        data: blog,
+        message: "Blog updated successfully",
+      });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }

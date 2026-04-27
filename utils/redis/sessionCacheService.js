@@ -5,6 +5,7 @@ const {
 } = require("../../services/socket/handleAstrologerEvents");
 const logger = require("../logger");
 const CacheService = require("./cacheService");
+const redisClient = require("./redisClient");
 const SESSION_PREFIX = "session:active";
 const ASTRO_BUSY_PREFIX = "astrologer:busy:";
 const USER_PREFIX = "user:info";
@@ -240,7 +241,10 @@ async function getUser(userId) {
 
 async function addUserToBusyWaitList(astrologerId, userId) {
   const key = `busy_waiting_users:${astrologerId}`;
-  await redis.sadd(key, userId.toString());
+
+  const client = redisClient.getClient(); // 🔥 important
+
+  await client.sAdd(key, userId.toString()); // ✅ correct method name
 }
 
 async function getAndClearBusyWaitList(astrologerId) {

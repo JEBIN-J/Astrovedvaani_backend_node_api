@@ -10,7 +10,13 @@ exports.createCategory = async (req, res) => {
       ? await categoryService.updateCategory(id, data)
       : await categoryService.createCategory(data);
 
-    res.status(id ? 200 : 201).json({ success: true, data: category });
+    res
+      .status(id ? 200 : 201)
+      .json({
+        success: true,
+        data: category,
+        message: "Blog category added successfully",
+      });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -24,7 +30,13 @@ exports.updateCategory = async (req, res) => {
       ? await categoryService.updateCategory(id, req.body)
       : await categoryService.createCategory(req.body);
 
-    res.status(id ? 200 : 201).json({ success: true, data: category });
+    res
+      .status(id ? 200 : 201)
+      .json({
+        success: true,
+        data: category,
+        message: "Blog category updated successfully",
+      });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }

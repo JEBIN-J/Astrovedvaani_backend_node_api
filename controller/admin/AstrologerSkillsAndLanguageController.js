@@ -10,10 +10,13 @@ exports.getLanguages = asyncHandler(async (req, res) => {
   if (role === Enums.USER.ROLE.USER) {
     isActive = true;
   }
-  const result = await LanguageService.getAllLanguages({ 
-    page: Number(page), 
-    limit: Number(limit), 
-    isActive: isActive !== undefined ? isActive === "true" || isActive === true : undefined,
+  const result = await LanguageService.getAllLanguages({
+    page: Number(page),
+    limit: Number(limit),
+    isActive:
+      isActive !== undefined
+        ? isActive === "true" || isActive === true
+        : undefined,
     search: search || undefined,
   });
 
@@ -25,20 +28,25 @@ exports.getLanguages = asyncHandler(async (req, res) => {
   });
 });
 
-
 exports.addLanguage = asyncHandler(async (req, res) => {
   const data = await LanguageService.createLanguage(req.body);
-  res.status(201).json({ success: true, data });
+  res
+    .status(201)
+    .json({ success: true, message: "Language added successfully", data });
 });
 
 exports.updateLanguage = asyncHandler(async (req, res) => {
   const data = await LanguageService.updateLanguage(req.query.id, req.body);
-  res.status(200).json({ success: true, data });
+  res
+    .status(200)
+    .json({ success: true, message: "Language updated successfully", data });
 });
 
 exports.deleteLanguage = asyncHandler(async (req, res) => {
   await LanguageService.removeLanguage(req.query.id);
-  res.status(200).json({ success: true, message: "Language deleted successfully" });
+  res
+    .status(200)
+    .json({ success: true, message: "Language deleted successfully" });
 });
 
 exports.getSpecializations = asyncHandler(async (req, res) => {
@@ -54,7 +62,9 @@ exports.getSpecializations = asyncHandler(async (req, res) => {
     page: Number(page),
     limit: Number(limit),
     isActive:
-      isActive !== undefined ? isActive === "true" || isActive === true : undefined,
+      isActive !== undefined
+        ? isActive === "true" || isActive === true
+        : undefined,
     related_to: related_to !== undefined ? Number(related_to) : undefined,
     search: search || undefined,
   });
@@ -69,19 +79,35 @@ exports.getSpecializations = asyncHandler(async (req, res) => {
 
 exports.addSpecialization = asyncHandler(async (req, res) => {
   const data = await LanguageService.createSpecialization(req.body);
-  res.status(201).json({ success: true, data });
+  res
+    .status(201)
+    .json({
+      success: true,
+      data,
+      message: "Specialization added successfully",
+    });
 });
 
 exports.updateSpecialization = asyncHandler(async (req, res) => {
-  const data = await LanguageService.updateSpecialization(req.query.id, req.body);
-  res.status(200).json({ success: true, data });
+  const data = await LanguageService.updateSpecialization(
+    req.query.id,
+    req.body,
+  );
+  res
+    .status(200)
+    .json({
+      success: true,
+      data,
+      message: "Specialization updated successfully",
+    });
 });
 
 exports.deleteSpecialization = asyncHandler(async (req, res) => {
   await LanguageService.removeSpecialization(req.query.id);
-  res.status(200).json({ success: true, message: "Specialization deleted successfully" });
+  res
+    .status(200)
+    .json({ success: true, message: "Specialization deleted successfully" });
 });
-
 
 const CACHE_KEY = CacheService.CACHE_PREFIXES.USERS_LIST + ":skills:user-view";
 
@@ -92,10 +118,7 @@ exports.getSkills = asyncHandler(async (req, res) => {
   const role = req.user?.role || Enums.USER.ROLE.ASTROLOGER;
 
   // Force only active for USER & ASTROLOGER
-  if (
-    role === Enums.USER.ROLE.USER ||
-    role === Enums.USER.ROLE.ASTROLOGER
-  ) {
+  if (role === Enums.USER.ROLE.USER || role === Enums.USER.ROLE.ASTROLOGER) {
     isActive = true;
   }
 
