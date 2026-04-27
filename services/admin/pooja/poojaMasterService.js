@@ -161,17 +161,15 @@ exports.getAllBookings = async ({
   is_astrologer_assigned,
   user_id,
   astrologer_id,
-
   booking_start_date,
   booking_end_date,
   pooja_start_date,
   pooja_end_date,
 }) => {
   const skip = (page - 1) * limit;
-
   const match = {};
 
-  // ✅ Basic filters
+  // ✅ Filters
   if (booking_status) match.booking_status = parseInt(booking_status);
   if (payment_status) match.payment_status = parseInt(payment_status);
 
@@ -185,45 +183,39 @@ exports.getAllBookings = async ({
     match.astrologer_id = null;
   }
 
-  // ✅ Booking date filter (scheduled_at)
+  // ✅ Date filters
   if (booking_start_date || booking_end_date) {
     match.scheduled_at = {};
-
     if (booking_start_date) {
       const start = new Date(booking_start_date);
-      start.setHours(0, 0, 0, 0); // start of day
+      start.setHours(0, 0, 0, 0);
       match.scheduled_at.$gte = start;
     }
-
     if (booking_end_date) {
       const end = new Date(booking_end_date);
-      end.setHours(23, 59, 59, 999); // ✅ end of day
+      end.setHours(23, 59, 59, 999);
       match.scheduled_at.$lte = end;
     }
   }
 
-  // ✅ Pooja date filter (createdAt)
   if (pooja_start_date || pooja_end_date) {
     match.createdAt = {};
-
     if (pooja_start_date) {
       const start = new Date(pooja_start_date);
       start.setHours(0, 0, 0, 0);
       match.createdAt.$gte = start;
     }
-
     if (pooja_end_date) {
       const end = new Date(pooja_end_date);
-      end.setHours(23, 59, 59, 999); // ✅ end of day
+      end.setHours(23, 59, 59, 999);
       match.createdAt.$lte = end;
     }
   }
 
-  // 🔥 AGGREGATION PIPELINE
   const pipeline = [
     { $match: match },
 
-    // ✅ Join user
+    // ✅ USER
     {
       $lookup: {
         from: "users",
@@ -234,7 +226,7 @@ exports.getAllBookings = async ({
     },
     { $unwind: "$user" },
 
-    // ✅ Join pooja
+    // ✅ POOJA
     {
       $lookup: {
         from: "poojamasters",
@@ -245,7 +237,7 @@ exports.getAllBookings = async ({
     },
     { $unwind: "$pooja" },
 
-    // ✅ Join astrologer
+    // ✅ ASTROLOGER
     {
       $lookup: {
         from: "astrologers",
@@ -261,25 +253,57 @@ exports.getAllBookings = async ({
       },
     },
 
-    // ✅ Pooja date filter (pooja createdAt)
-    // ...(pooja_start_date || pooja_end_date
-    //   ? [
-    //       {
-    //         $match: {
-    //           "pooja.createdAt": {
-    //             ...(pooja_start_date && {
-    //               $gte: new Date(pooja_start_date),
-    //             }),
-    //             ...(pooja_end_date && {
-    //               $lte: new Date(pooja_end_date),
-    //             }),
-    //           },
-    //         },
-    //       },
-    //     ]
-    //   : []),
+    // ✅ SPECIALIZATIONS
+    {
+      $lookup: {
+        from: "specializations",
+        localField: "astrologer.specializations",
+        foreignField: "_id",
+        as: "astrologer.specializations",
+      },
+    },
 
-    // ✅ SEARCH (IMPORTANT)
+    // ✅ LANGUAGES SPOKEN (NEW 🔥)
+    {
+      $lookup: {
+        from: "languages",
+        localField: "astrologer.languages_spoken",
+        foreignField: "_id",
+        as: "astrologer.languages_spoken",
+      },
+    },
+
+    // ✅ ASTROLOGER MOBILE NUMBER
+    {
+      $lookup: {
+        from: "users",
+        localField: "astrologer.user_id",
+        foreignField: "_id",
+        as: "astroUser",
+      },
+    },
+    {
+      $unwind: {
+        path: "$astroUser",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+
+    // ✅ Merge mobile into astrologer
+    {
+      $addFields: {
+        "astrologer.mobileNumber": "$astroUser.mobileNumber",
+      },
+    },
+
+    // ❌ Remove extra
+    {
+      $project: {
+        astroUser: 0,
+      },
+    },
+
+    // ✅ SEARCH
     ...(search
       ? [
           {
@@ -302,7 +326,7 @@ exports.getAllBookings = async ({
     // ✅ SORT
     { $sort: { createdAt: -1 } },
 
-    // ✅ FACET for pagination
+    // ✅ PAGINATION
     {
       $facet: {
         bookings: [{ $skip: skip }, { $limit: limit }],
