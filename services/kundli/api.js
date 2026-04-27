@@ -120,12 +120,19 @@ const API = {
       tz,
     )}&birthPlace=${encodeURIComponent(birthPlace)}`,
 
-  ASHTAKVARGA_CHARTS: ({ dob, tob, birthPlace, tz, style = "north" }) =>
+  ASHTAKVARGA_CHARTS: ({
+    dob,
+    tob,
+    birthPlace,
+    tz,
+    style = "north",
+    lang = "en",
+  }) =>
     `${BASE_URL}v1/kundali/ashtakavarga?dob=${encodeURIComponent(
       dob,
     )}&tob=${encodeURIComponent(tob)}&birthPlace=${encodeURIComponent(
       birthPlace,
-    )}&tz=${encodeURIComponent(tz)}&style=${encodeURIComponent(style)}`,
+    )}&tz=${encodeURIComponent(tz)}&style=${encodeURIComponent(style)}&lang=${encodeURIComponent(lang)}`,
 
   CHARTS: ({ dob, tob, tz, lang = "en", birthPlace, div, style = "north" }) =>
     `${BASE_URL}v1/kundali/all-charts?dob=${encodeURIComponent(

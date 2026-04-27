@@ -235,7 +235,7 @@ exports.getCompleteKundliByUserId = asyncHandler(async (req, res) => {
       kundliService.getKundliData(targetUserId, {}, isRelative),
       kundliService.getKundliDetailsData(targetUserId, isQuery, {}),
       kundliService.getKPDetails(targetUserId, {}, isRelative),
-      kundliService.getAshtakvargaChartDetails(
+      kundliService.getAshtakvargaCharts(
         targetUserId,
         "north",
         null,
