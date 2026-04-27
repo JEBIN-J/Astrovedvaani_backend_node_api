@@ -33,7 +33,7 @@ const getKundli = asyncHandler(async (req, res) => {
 });
 
 const getKundliDetails = asyncHandler(async (req, res) => {
-   const { userId, queryParams, isRelative } = extractCommonParams(req);
+  const { userId, queryParams, isRelative } = extractCommonParams(req);
 
   const kundliDetailsData = await kundliService.getKundliDetailsData(
     userId,
@@ -65,7 +65,7 @@ const getAshtakvargaCharts = asyncHandler(async (req, res) => {
 
   console.log("Extracted Params:", { userId, queryParams, isRelative });
 
-  const kundliDetailsData = await kundliService.getAshtakvargaChartDetails(
+  const kundliDetailsData = await kundliService.getAshtakvargaCharts(
     userId,
     queryParams,
     isRelative,
@@ -78,8 +78,7 @@ const getAshtakvargaCharts = asyncHandler(async (req, res) => {
 const getCharts = asyncHandler(async (req, res) => {
   const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-    console.log("Extracted Params:", { userId, queryParams, isRelative });
-
+  console.log("Extracted Params:", { userId, queryParams, isRelative });
 
   const data = await kundliService.getChartDetails(
     userId,
@@ -93,17 +92,12 @@ const getCharts = asyncHandler(async (req, res) => {
 const getDasha = asyncHandler(async (req, res) => {
   const { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  const data = await kundliService.getDasha(
-    userId,
-    queryParams,
-    isRelative,
-  );
+  const data = await kundliService.getDasha(userId, queryParams, isRelative);
 
   res.status(200).json(data);
 });
 
 const getAscendantReport = asyncHandler(async (req, res) => {
- 
   const { userId, queryParams, isRelative } = extractCommonParams(req);
 
   const reportData = await kundliService.getAscendantReport(
@@ -170,12 +164,11 @@ const getChoghadiya = asyncHandler(async (req, res) => {
 });
 
 const getFullKundliData = asyncHandler(async (req, res) => {
-  console.log("query",req.query);
+  console.log("query", req.query);
   let { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  if(queryParams?.isAstroSide == 'true')
-  {
-    isRelative=false;
+  if (queryParams?.isAstroSide == "true") {
+    isRelative = false;
   }
 
   console.log("Extracted Params for Full Kundli Data:", {
