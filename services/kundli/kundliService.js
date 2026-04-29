@@ -7,11 +7,9 @@ const { query } = require("express");
 const { BadRequestError } = require("../../errors");
 const User = require("../../models/User");
 const { getDosha, getTransitPlanets } = require("./transitDoshaService");
-// const { ResponseStream } = require("openai/lib/responses/ResponseStream.js");
 const API = require("./api").default;
 const { fetchUserDetailsById } = require("../astrologer/userService");
 const { getSaasHeaders } = require("../../utils/apiHeader");
-const { lang } = require("moment-timezone");
 const formatWithLeadingZero = (num) => String(num).padStart(2, "0");
 
 const convertTo24Hour = (timeStr) => {
@@ -25,264 +23,146 @@ const convertTo24Hour = (timeStr) => {
   return `${formatWithLeadingZero(hours)}:${formatWithLeadingZero(minutes)}`;
 };
 
-const convertToDobTob = ({
-  dob,
-  tob,
-  day,
-  month,
-  year,
-  hour,
-  min,
-  dateObj,
-}) => {
-  let finalDob = null;
-  let finalTob = null;
-
+const normalizeParams = (queryParams = {}, profile = {}) => {
   const pad = (v) => String(v).padStart(2, "0");
 
-  const formatDate = (d) => {
-    if (!(d instanceof Date) || isNaN(d)) return null;
+  let dob;
+  let tob;
 
-    return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
-  };
-
-  const normalizeDOB = (dobStr) => {
-    if (!dobStr) return null;
-
-    dobStr = dobStr.replace(/\//g, "-");
-
-    const parts = dobStr.split("-");
-
-    // DD-MM-YYYY
-    if (parts.length === 3 && parts[0].length <= 2) {
-      return `${pad(parts[0])}-${pad(parts[1])}-${parts[2]}`;
-    }
-
-    // YYYY-MM-DD
-    if (parts.length === 3 && parts[0].length === 4) {
-      return `${pad(parts[2])}-${pad(parts[1])}-${parts[0]}`;
-    }
-
-    // Fallback
-    const d = new Date(dobStr);
-
-    if (!isNaN(d)) return formatDate(d);
-
-    return null;
-  };
-
-  const cleanTime = (time) => {
-    if (!time) return null;
-
-    // HH:mm:ss → HH:mm
-    if (/^\d{1,2}:\d{1,2}:\d{1,2}$/.test(time)) {
-      return time.split(":").slice(0, 2).join(":");
-    }
-
-    // HH:mm
-    if (/^\d{1,2}:\d{1,2}$/.test(time)) {
-      return time;
-    }
-
-    return null;
-  };
-
-  // ============================
-  // Case 1: dob + tob
-  // ============================
-  if (dob && tob) {
-    finalDob = normalizeDOB(dob);
-    finalTob = cleanTime(tob);
+  // ===============================
+  // CASE 1 → dob/tob format given
+  // ===============================
+  if (queryParams.dob) {
+    dob = queryParams.dob.replace(/\//g, "-");
+    tob = queryParams.tob || "00:00";
   }
 
-  // ============================
-  // Case 2: day month year hour min
-  // ============================
-  else if (day && month && year && hour && min) {
-    finalDob = `${pad(day)}-${pad(month)}-${year}`;
-    finalTob = `${pad(hour)}:${pad(min)}`;
+  // ===============================
+  // CASE 2 → day/month/year format
+  // ===============================
+  else if (queryParams.day) {
+    dob = `${pad(queryParams.day)}-${pad(queryParams.month)}-${queryParams.year}`;
+    tob = `${pad(queryParams.hour)}:${pad(queryParams.min)}`;
   }
 
-  // ============================
-  // Case 3: Date Object
-  // ============================
-  else if (dateObj instanceof Date) {
-    finalDob = formatDate(dateObj);
-  }
+  // ===============================
+  // CASE 3 → From Profile
+  // ===============================
+  else {
+    const birthDate = new Date(profile.birthDate);
 
-  // ============================
-  // Validation
-  // ============================
-  if (!finalDob) return null;
+    dob = `${pad(birthDate.getDate())}-${pad(
+      birthDate.getMonth() + 1,
+    )}-${birthDate.getFullYear()}`;
+
+    const [h, m] = profile.birthTime.split(":");
+    tob = `${pad(h)}:${pad(m)}`;
+  }
 
   return {
-    dob: finalDob,
-    tob: finalTob,
+    dob,
+    tob,
+    tz:
+      queryParams.tz ||
+      profile?.timezone ||
+      -new Date(profile?.birthDate || Date.now()).getTimezoneOffset() / 60,
+    lang: queryParams.lang || profile?.preferredLanguage || "en",
+    name: queryParams.name || profile?.name || "User",
+    birthPlace:
+      queryParams.birthPlace ||
+      queryParams.location ||
+      profile?.birthPlace?.trim(),
   };
 };
 
+// =====================================================
+// 🔥 COMMON PROFILE FETCHER
+// =====================================================
+
+const getProfile = async (userId, isRelative) => {
+  console.log("isRelative", isRelative);
+  console.log("userID", userId);
+  if (isRelative) {
+    return await UserAstrology.findById(userId);
+  }
+
+  return await UserAstrology.findOne({
+    userId,
+    relationshipToOwner: "self",
+  });
+};
+
+const callApi = async (apiUrl) => {
+  const response = await axios.get(apiUrl, {
+    headers: getSaasHeaders(),
+    // timeout: 15000,
+  });
+
+  return response;
+};
 const getKundliData = async (userId, queryParams = {}, isRelative = false) => {
   logger.info(
     `getKundliData called for userId=${userId}, isRelative=${isRelative}`,
   );
 
-  // -------------------------------
   // Fetch profile
-  // -------------------------------
-  let profile = null;
+  const profile = await getProfile(userId, isRelative);
+  if (!profile) throw new Error("Astrology profile not found");
 
-  if (userId) {
-    if (isRelative) {
-      profile = await UserAstrology.findById(userId);
-    } else {
-      profile = await UserAstrology.findOne({
-        userId,
-        relationshipToOwner: "self",
-      });
-    }
-  }
+  const params = normalizeParams(queryParams, profile);
 
-  // -------------------------------
-  // Guest validation
-  // -------------------------------
-  if (!queryParams.day && !profile) {
-    throw new Error("Please provide birth details in query params");
-  }
-
-  // -------------------------------
-  // Validate profile
-  // -------------------------------
-  if (
-    !queryParams.day &&
-    profile &&
-    (!profile.birthDate || !profile.birthTime || !profile.birthPlace)
-  ) {
-    throw new Error("Missing birth details in profile");
-  }
-
-  // -------------------------------
-  // Prepare Date & Time
-  // -------------------------------
-
-  const day =
-    queryParams.day ||
-    formatWithLeadingZero(new Date(profile.birthDate).getDate());
-
-  const month =
-    queryParams.month ||
-    formatWithLeadingZero(new Date(profile.birthDate).getMonth() + 1);
-
-  const year = queryParams.year || new Date(profile.birthDate).getFullYear();
-
-  const hour =
-    queryParams.hour ||
-    (profile ? convertTo24Hour(profile.birthTime).split(":")[0] : null);
-
-  const min =
-    queryParams.min ||
-    (profile ? convertTo24Hour(profile.birthTime).split(":")[1] : null);
-
-  const dob = `${day}-${month}-${year}`;
-  const tob = `${hour}:${min}`;
-
-  // -------------------------------
-  // API Params
-  // -------------------------------
-
-  const apiParams = {
-    dob,
-    tob,
-
-    tz: queryParams.tz || profile?.timezone || 5.5,
-
-    lang: queryParams.lang || "en",
-
-    name: queryParams.name || profile?.name || "User",
-
-    birthPlace: queryParams.birthPlace || profile?.birthPlace?.trim(),
-  };
-
-  logger.info(`Kundli API paramsshdsgdhsgdhs: ${JSON.stringify(apiParams)}`);
-
-  // -------------------------------
-  // Cache Key
-  // -------------------------------
+  console.log("User profile found:", profile);
 
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
-    `kundli-basic-${userId || "guest"}-${apiParams.lang}-${apiParams.name}-${dob}-${tob}-${apiParams.birthPlace}`,
-    userId || "guest",
+    "kundli-basic",
+    userId,
+    JSON.stringify(params),
   );
 
-  // -------------------------------
-  // Check Cache
-  // -------------------------------
-
   const cachedData = await CacheService.get(cacheKey);
-
   if (cachedData) {
-    logger.info(`Kundli Cache hit for userId=${userId}`);
     return cachedData;
   }
 
-  // -------------------------------
-  // Call API
-  // -------------------------------
+  const cached = await CacheService.get(cacheKey);
+  if (cached) return cached;
 
-  const apiUrl = API.KUNDLI(apiParams);
-
-  logger.info(`Fetching Kundli data from API: ${apiUrl}`);
-
-  const response = await axios.get(apiUrl, {
-    headers: getSaasHeaders(),
-    timeout: 15000,
-  });
+  const apiUrl = API.KUNDLI(params);
+  const response = await callApi(apiUrl);
 
   logger.info(`Kundli data fetched successfully`);
 
-  // -------------------------------
-  // Update profile (SAFE)
-  // -------------------------------
-
-  if (profile && !profile.isKundli) {
+  if (!profile.isKundli) {
     profile.isKundli = true;
     await profile.save();
-
-    logger.info(`isKundli updated for userId=${userId}`);
   }
 
-  // -------------------------------
-  // Update astrology (Only logged user)
-  // -------------------------------
-
-  if (profile && response.data && response.data.success && !isRelative) {
+  // Update user astrology
+  if (response.data && response.data.success && !isRelative) {
     await updateUserAstrologyWithKundli(userId, response.data, false);
   }
 
-  // -------------------------------
-  // Save Cache
-  // -------------------------------
-
+  // Cache
   await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-
-  logger.info(`Cached Basic Kundli for userId=${userId}`);
 
   return response.data;
 };
-
-const getKundliDetailsData = async (userId, isQuery, queryParams = {}) => {
+const getKundliDetailsData = async (
+  userId,
+  queryParams = {},
+  isRelative = false,
+) => {
   logger.info(`getKundliDetailsData called for userId=${userId}`);
 
-  // ✅ Safe cache key (guest + user)
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
     "kundli-details",
-    userId || "guest",
+    userId,
     JSON.stringify(queryParams),
   );
 
   const cachedData = await CacheService.get(cacheKey);
-
   if (cachedData) {
     logger.info(
       `Returning Kundli Details data from cache for userId=${userId}`,
@@ -290,102 +170,24 @@ const getKundliDetailsData = async (userId, isQuery, queryParams = {}) => {
     return cachedData;
   }
 
-  let profile = null;
-
-  if (!queryParams.day && userId) {
-    if (!isQuery) {
-      profile = await UserAstrology.findOne({
-        userId,
-        relationshipToOwner: "self",
-      });
-    } else {
-      profile = await UserAstrology.findById(userId);
-    }
-
-    if (!profile) {
-      throw new Error("Astrology profile not found for user");
-    }
-
-    if (!profile.birthDate || !profile.birthTime || !profile.birthPlace) {
-      throw new Error("Missing birth details in profile");
-    }
-  }
-
-  // ✅ Guest validation
-  if (!userId && !queryParams.day) {
-    throw new Error(
-      "Please provide day, month, year, hour, min in query params",
-    );
-  }
+  const profile = await getProfile(userId, isRelative);
+  if (!profile) throw new Error("Astrology profile not foundsasa");
 
   // -------------------------------
   // Prepare Date & Time
   // -------------------------------
 
-  const day =
-    queryParams.day ||
-    formatWithLeadingZero(new Date(profile.birthDate).getDate());
-
-  const month =
-    queryParams.month ||
-    formatWithLeadingZero(new Date(profile.birthDate).getMonth() + 1);
-
-  const year = queryParams.year || new Date(profile.birthDate).getFullYear();
-
-  const hour =
-    queryParams.hour ||
-    (profile ? convertTo24Hour(profile.birthTime).split(":")[0] : null);
-
-  const min =
-    queryParams.min ||
-    (profile ? convertTo24Hour(profile.birthTime).split(":")[1] : null);
+  const params = normalizeParams(queryParams, profile);
 
   // -------------------------------
-  // API Format
+  // API Call with Header ✅
   // -------------------------------
 
-  const dob = `${day}-${month}-${year}`; // DD-MM-YYYY
-  const tob = `${hour}:${min}`; // HH:mm
-
-  // -------------------------------
-  // Final API Params
-  // -------------------------------
-
-  const apiParams = {
-    dob,
-    tob,
-
-    tz: queryParams.tz || profile?.timezone || 5.5,
-
-    lang: queryParams.lang || profile?.preferredLanguage || "en",
-
-    name: queryParams.name || profile?.name || "User",
-
-    birthPlace: queryParams.birthPlace || profile?.birthPlace?.trim(),
-  };
-
-  logger.info(`Kundli Details API params: ${JSON.stringify(apiParams)}`);
-
-  // -------------------------------
-  // API Call
-  // -------------------------------
-
-  const apiUrl = API.KUNDLI_DETAILS(apiParams);
+  const apiUrl = API.KUNDLI_DETAILS(params);
 
   logger.info(`Fetching Kundli Details data from API: ${apiUrl}`);
 
-  try {
-    response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
-  } catch (apiError) {
-    logger.error(
-      `Kundli Details API error: ${apiError.message}`,
-      apiError.response?.data || {},
-    );
-    throw new Error("Failed to fetch Kundli Details from astrology API");
-  }
+  const response = await callApi(apiUrl);
   logger.info(`Kundli Details data fetched successfully`);
 
   // -------------------------------
@@ -397,732 +199,183 @@ const getKundliDetailsData = async (userId, isQuery, queryParams = {}) => {
   logger.info(
     `Cached Kundli Details data for userId=${userId} with 48 hours TTL`,
   );
+
   return response.data;
 };
 
-const getKPDetails = async (
-  userId,
-  queryParams = {},
-  isRelative = false,
-  useQueryParams = false,
-) => {
-  logger.info(
-    `getKPDetails called userId=${userId}, isRelative=${isRelative}, useQueryParams=${useQueryParams}`,
-  );
-
-  if (
-    (queryParams.dob && queryParams.tob) ||
-    (queryParams.day &&
-      queryParams.month &&
-      queryParams.year &&
-      queryParams.hour &&
-      queryParams.min)
-  ) {
-    useQueryParams = true;
-  }
+const getKPDetails = async (userId, queryParams = {}, isRelative = false) => {
+  logger.info(`getKPDetails called for userId=${userId}`);
 
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
     "kundli-KP",
-    userId || "guest",
-    JSON.stringify({
-      ...queryParams,
-      isRelative,
-      useQueryParams,
-    }),
+    userId,
+    JSON.stringify(queryParams),
   );
 
   const cachedData = await CacheService.get(cacheKey);
-
   if (cachedData) {
-    logger.info("Returning KP data from cache");
+    logger.info(`Returning Kundli data from cache for userId=${userId}`);
     return cachedData;
   }
 
-  const cleanTOB = (tob) => {
-    if (!tob) return null;
+  const profile = await getProfile(userId, isRelative);
+  if (!profile) throw new Error("Astrology profile not found");
 
-    // HH:mm:ss → HH:mm
-    if (/^\d{1,2}:\d{1,2}:\d{1,2}$/.test(tob)) {
-      return tob.split(":").slice(0, 2).join(":");
-    }
+  const params = normalizeParams(queryParams, profile);
 
-    // HH:mm
-    if (/^\d{1,2}:\d{1,2}$/.test(tob)) {
-      return tob;
-    }
+  const apiUrl = API.KP_DETAILS(params);
+  logger.info(`Fetching Kundli data from API: ${apiUrl}`);
 
-    return null;
-  };
+  const response = await callApi(apiUrl);
 
-  if (useQueryParams) {
-    const converted = convertToDobTob({
-      dob: queryParams.dob,
-      tob: queryParams.tob,
+  logger.info(`Kundli data fetched successfully for userId=${userId}`);
 
-      day: queryParams.day,
-      month: queryParams.month,
-      year: queryParams.year,
-      hour: queryParams.hour,
-      min: queryParams.min,
-    });
+  // if (!queryParams.dob) {
+  //   await profile.save();
+  //   logger.info(`Marked profile as Kundli generated for userId=${userId}`);
 
-    if (!converted) {
-      throw new Error("Invalid date/time in query params");
-    }
-
-    const finalTob = cleanTOB(converted.tob);
-
-    if (!finalTob) {
-      throw new Error("Invalid time format");
-    }
-
-    const apiParams = {
-      dob: converted.dob,
-      tob: finalTob,
-
-      tz: queryParams.tz || 5.5,
-      birthPlace: queryParams.birthPlace,
-      lang: queryParams.lang || "en",
-    };
-
-    const apiUrl = API.KP_DETAILS(apiParams);
-
-    logger.info(`[KP] Fetching via query params: ${apiUrl}`);
-
-    const response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
-
-    await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-
-    return response.data;
-  }
-
-  // ====================================================
-  // MODE 2: PROFILE / RELATIVE MODE
-  // ====================================================
-
-  let profile = null;
-
-  if (isRelative) {
-    profile = await UserAstrology.findById(userId);
-  } else {
-    profile = await UserAstrology.findOne({
-      userId,
-      relationshipToOwner: "self",
-    });
-  }
-
-  if (!profile) {
-    throw new Error("Astrology profile not found");
-  }
-
-  if (!profile.birthDate || !profile.birthTime || !profile.birthPlace) {
-    throw new Error("Missing birth details in profile");
-  }
-
-  const converted = convertToDobTob({
-    dob: queryParams.dob,
-    tob: queryParams.tob,
-
-    day: queryParams.day,
-    month: queryParams.month,
-    year: queryParams.year,
-    hour: queryParams.hour,
-    min: queryParams.min,
-
-    dateObj: profile.birthDate,
-  });
-
-  if (!converted) {
-    throw new Error("Invalid DOB / TOB format");
-  }
-
-  const finalDob = converted.dob;
-
-  let finalTob = converted.tob || convertTo24Hour(profile.birthTime);
-
-  finalTob = cleanTOB(finalTob);
-
-  if (!finalTob) {
-    throw new Error("Invalid time format");
-  }
-
-  const tz =
-    queryParams.tz ||
-    profile?.timezone ||
-    -new Date(profile.birthDate).getTimezoneOffset() / 60;
-
-  const birthPlace =
-    queryParams.birthPlace || profile.birthPlace.trim().split(",")[0];
-
-  const apiParams = {
-    dob: finalDob,
-    tob: finalTob,
-    tz,
-    birthPlace,
-    lang: queryParams.lang || profile?.preferredLanguage || "en",
-  };
-
-  logger.info(`[KP] API Params: ${JSON.stringify(apiParams)}`);
-
-  const apiUrl = API.KP_DETAILS(apiParams);
-
-  logger.info(`[KP] Fetching via profile: ${apiUrl}`);
-
-  const response = await axios.get(apiUrl, {
-    headers: getSaasHeaders(),
-    timeout: 15000,
-  });
-
-  logger.info("KP API data fetched");
-
-  if (response.data?.success && !isRelative) {
-    await updateUserAstrologyWithKundli(userId, response.data);
-  }
+  //   if (response.data && response.data.success) {
+  //     await updateUserAstrologyWithKundali(userId, response.data);
+  //   } else {
+  //     logger.warn(`Kundli API response unsuccessful for userId=${userId}`);
+  //   }
+  // }
 
   await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-
-  logger.info("KP data cached for 48 hours");
+  logger.info(`Cached Kundli data for userId=${userId} with 48 hours TTL`);
 
   return response.data;
 };
 
-const getAshtakvargaCharts = async (
+const getAshtakvargaChartDetails = async (
   userId,
-  style = "north",
   queryParams = {},
   isRelative = false,
-  useQueryParams = false,
 ) => {
-  try {
-    logger.info(`getAshtakvargaCharts called userId=${userId}, style=${style}`);
+  logger.info(`getAshtakvargaChartDetails called for userId=${userId}`);
 
-    if (
-      (queryParams?.dob && queryParams?.tob) ||
-      (queryParams?.day &&
-        queryParams?.month &&
-        queryParams?.year &&
-        queryParams?.hour &&
-        queryParams?.min)
-    ) {
-      useQueryParams = true;
-    }
+  const profile = await getProfile(userId, isRelative);
+  if (!profile) throw new Error("Astrology profile not found");
 
-    const cacheKey = CacheService.generateKey(
-      CacheService.CACHE_PREFIXES.USER_DETAILS,
-      "kundli-Ashtakvarga",
-      userId || "guest",
-      style,
-      JSON.stringify({ ...queryParams, isRelative, useQueryParams }),
-    );
+  const params = normalizeParams(queryParams, profile);
 
-    const cachedData = await CacheService.get(cacheKey);
-    if (cachedData) {
-      logger.info("Returning Ashtakvarga data from cache");
-      return cachedData;
-    }
-
-    const cleanTOB = (tob) => {
-      if (!tob) return null;
-
-      if (/^\d{1,2}:\d{1,2}:\d{1,2}$/.test(tob)) {
-        return tob.split(":").slice(0, 2).join(":");
-      }
-
-      if (/^\d{1,2}:\d{1,2}$/.test(tob)) {
-        return tob;
-      }
-
-      return null;
-    };
-
-    if (useQueryParams) {
-      const converted = convertToDobTob({
-        dob: queryParams?.dob,
-        tob: queryParams?.tob,
-        day: queryParams?.day,
-        month: queryParams?.month,
-        year: queryParams?.year,
-        hour: queryParams?.hour,
-        min: queryParams?.min,
-      });
-
-      if (!converted || !converted.dob) {
-        throw new Error("Invalid date/time in query params");
-      }
-
-      const finalTob = cleanTOB(converted.tob);
-      if (!finalTob) throw new Error("Invalid time format");
-
-      const apiParams = {
-        dob: converted.dob,
-        tob: finalTob,
-        tz: queryParams?.tz || 5.5,
-        birthPlace: queryParams?.birthPlace,
-        style,
-        lang: queryParams?.lang || "en",
-      };
-
-      const apiUrl = API.ASHTAKVARGA_CHARTS(apiParams);
-
-      const response = await axios.get(apiUrl, {
-        headers: getSaasHeaders(),
-        timeout: 15000,
-      });
-
-      await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-      return response.data;
-    }
-
-    let profile = null;
-
-    if (isRelative) {
-      profile = await UserAstrology.findById(userId);
-    } else {
-      profile = await UserAstrology.findOne({
-        userId,
-        relationshipToOwner: "self",
-      });
-    }
-
-    if (!profile) {
-      throw new Error("Astrology profile not found");
-    }
-    if (!profile.birthDate || !profile.birthTime || !profile.birthPlace) {
-      throw new Error("Missing birth details in profile");
-    }
-
-    const converted = convertToDobTob({
-      dob: queryParams?.dob,
-      tob: queryParams?.tob,
-      day: queryParams?.day,
-      month: queryParams?.month,
-      year: queryParams?.year,
-      hour: queryParams?.hour,
-      min: queryParams?.min,
-      dateObj: profile.birthDate,
-    });
-
-    if (!converted || !converted.dob) {
-      throw new Error("Invalid DOB / TOB conversion failed");
-    }
-
-    let finalTob = converted.tob || convertTo24Hour(profile.birthTime);
-
-    finalTob = cleanTOB(finalTob);
-    if (!finalTob) throw new Error("Invalid time format");
-
-    const tz =
-      queryParams?.tz ||
-      profile?.timezone ||
-      -new Date(profile.birthDate).getTimezoneOffset() / 60;
-
-    const birthPlace =
-      queryParams?.birthPlace || profile.birthPlace?.trim()?.split(",")[0];
-
-    const apiParams = {
-      dob: converted.dob,
-      tob: finalTob,
-      tz,
-      birthPlace,
-      style,
-      lang: queryParams?.lang || "en",
-    };
-
-    const apiUrl = API.ASHTAKVARGA_CHARTS(apiParams);
-
-    const response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
-
-    if (response.data?.success && !isRelative) {
-      await updateUserAstrologyWithKundli(userId, response.data);
-    }
-
-    await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-
-    return response.data;
-  } catch (error) {
-    logger.warn(`[getAshtakvargaCharts] Failed: ${error.message}`);
-    throw error;
-  }
-};
-const getCharts = async (
-  userId,
-  div = "D1",
-  style = "north",
-  lang = "en",
-  queryParams = {},
-  isRelative = false,
-  useQueryParams = false,
-) => {
-  logger.info(
-    `getCharts called userId=${userId}, div=${div}, style=${style}, lang=${lang}, isRelative=${isRelative}, useQueryParams=${useQueryParams}`,
-  );
-
-  // ===============================
-  // AUTO ENABLE QUERY MODE
-  // ===============================
-  if (
-    (queryParams.dob && queryParams.tob) ||
-    (queryParams.day &&
-      queryParams.month &&
-      queryParams.year &&
-      queryParams.hour &&
-      queryParams.min)
-  ) {
-    useQueryParams = true;
-  }
-
-  // ===============================
-  // Cache Key
-  // ===============================
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
-    "kundli-charts",
-    div,
-    style,
-    lang,
-    userId || "guest",
-    JSON.stringify({
-      ...queryParams,
-      isRelative,
-      useQueryParams,
-    }),
+    "kundli-Ashtakvarga",
+    userId,
+    JSON.stringify(params),
   );
 
   const cachedData = await CacheService.get(cacheKey);
-
   if (cachedData) {
-    logger.info("Returning chart data from cache");
+    logger.info(`Returning Kundli data from cache for userId=${userId}`);
     return cachedData;
   }
 
-  // ===============================
-  // Helper: Clean TOB
-  // ===============================
-  const cleanTOB = (tob) => {
-    if (!tob) return null;
-
-    // HH:mm:ss → HH:mm
-    if (/^\d{1,2}:\d{1,2}:\d{1,2}$/.test(tob)) {
-      return tob.split(":").slice(0, 2).join(":");
-    }
-
-    // HH:mm
-    if (/^\d{1,2}:\d{1,2}$/.test(tob)) {
-      return tob;
-    }
-
-    return null;
-  };
-
-  // ====================================================
-  // MODE 1: DIRECT QUERY MODE (Guest / Manual Input)
-  // ====================================================
-  if (useQueryParams) {
-    const converted = convertToDobTob({
-      dob: queryParams.dob,
-      tob: queryParams.tob,
-
-      day: queryParams.day,
-      month: queryParams.month,
-      year: queryParams.year,
-      hour: queryParams.hour,
-      min: queryParams.min,
-    });
-
-    if (!converted) {
-      throw new Error("Invalid date/time in query params");
-    }
-
-    const finalTob = cleanTOB(converted.tob);
-
-    if (!finalTob) {
-      throw new Error("Invalid time format");
-    }
-
-    const apiParams = {
-      dob: converted.dob,
-      tob: finalTob,
-
-      tz: queryParams.tz || 5.5,
-      birthPlace: queryParams.birthPlace,
-
-      div,
-      style,
-      lang,
-    };
-
-    const apiUrl = API.CHARTS(apiParams);
-
-    logger.info(`[Charts] Fetching via query params: ${apiUrl}`);
-
-    const response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
-
-    await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-
-    return response.data;
-  }
-
-  // ====================================================
-  // MODE 2: PROFILE / RELATIVE MODE
-  // ====================================================
-
-  let profile = null;
-
-  if (isRelative) {
-    profile = await UserAstrology.findById(userId);
-  } else {
-    profile = await UserAstrology.findOne({
-      userId,
-      relationshipToOwner: "self",
-    });
-  }
-
-  if (!profile) {
-    throw new Error("Astrology profile not found");
-  }
-
-  if (!profile.birthDate || !profile.birthTime || !profile.birthPlace) {
-    throw new Error("Missing birth details in profile");
-  }
-
-  // ===============================
-  // Convert DOB / TOB
-  // ===============================
-
-  const converted = convertToDobTob({
-    dob: queryParams.dob,
-    tob: queryParams.tob,
-
-    day: queryParams.day,
-    month: queryParams.month,
-    year: queryParams.year,
-    hour: queryParams.hour,
-    min: queryParams.min,
-
-    dateObj: profile.birthDate,
+  const apiUrl = API.ASHTAKVARGA_CHARTS({
+    ...params,
+    style: queryParams.style || "north",
   });
 
-  if (!converted) {
-    throw new Error("Invalid DOB / TOB format");
-  }
+  logger.info(`Fetching Kundli data from API: ${apiUrl}`);
 
-  const finalDob = converted.dob;
+  const response = await callApi(apiUrl);
+  logger.info(`Kundli data fetched successfully for userId=${userId}`);
 
-  let finalTob = converted.tob || convertTo24Hour(profile.birthTime);
+  // if (!profile.isKundli) {
+  //   await profile.save();
+  //   logger.info(`Marked profile as Kundli generated for userId=${userId}`);
+  // }
 
-  finalTob = cleanTOB(finalTob);
-
-  if (!finalTob) {
-    throw new Error("Invalid time format");
-  }
-
-  // ===============================
-  // Timezone
-  // ===============================
-  const tz =
-    queryParams.tz ||
-    profile?.timezone ||
-    -new Date(profile.birthDate).getTimezoneOffset() / 60;
-
-  // ===============================
-  // Birth Place
-  // ===============================
-  const birthPlace =
-    queryParams.birthPlace || profile.birthPlace.trim().split(",")[0];
-
-  // ===============================
-  // API Params
-  // ===============================
-
-  const apiParams = {
-    dob: finalDob,
-    tob: finalTob,
-    tz,
-    birthPlace,
-
-    div,
-    style,
-    lang,
-  };
-
-  logger.info(`[Charts] API Params: ${JSON.stringify(apiParams)}`);
-
-  // ===============================
-  // API Call
-  // ===============================
-
-  const apiUrl = API.CHARTS(apiParams);
-
-  logger.info(`[Charts] Fetching via profile: ${apiUrl}`);
-
-  const response = await axios.get(apiUrl, {
-    headers: getSaasHeaders(),
-    timeout: 15000,
-  });
-
-  logger.info("Charts API data fetched");
-
-  // ===============================
-  // Save (Only Main User)
-  // ===============================
-
-  if (response.data?.success && !isRelative) {
-    await updateUserAstrologyWithKundli(userId, response.data);
-  }
-
-  // ===============================
-  // Cache
-  // ===============================
+  // if (response.data?.success) {
+  //   await updateUserAstrologyWithKundli(userId, response.data);
+  // } else {
+  //   logger.warn(`Kundli API response unsuccessful for userId=${userId}`);
+  // }
 
   await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-
-  logger.info("Charts data cached for 48 hours");
 
   return response.data;
 };
 
-const getDasha = async (
+const getChartDetails = async (
   userId,
-  useQueryParams,
-  day,
-  month,
-  year,
-  hour,
-  min,
-  tz,
-  lang,
-  name,
-  location,
+  queryParams = {},
+  isRelative = false,
 ) => {
-  const pad = (v) => String(v).padStart(2, "0");
+  logger.info(`getChartDetails called for userId=${userId}`);
 
-  let dob;
-  let tob;
-  let apiParams;
-  let profile = null;
+  const profile = await getProfile(userId, isRelative);
+  if (!profile) throw new Error("Astrology profile not found");
 
-  // ===============================
-  // QUERY MODE (Guest or Manual Input)
-  // ===============================
-  if (useQueryParams) {
-    dob = `${pad(day)}-${pad(month)}-${year}`;
-    tob = `${pad(hour)}:${pad(min)}`;
+  const params = normalizeParams(queryParams, profile);
 
-    apiParams = {
-      dob,
-      tob,
-      tz: tz || 5.5,
-      lang: lang || "en",
-      name: name || "User",
-      birthPlace: location,
-    };
-  } else {
-    // ===============================
-    // TOKEN MODE (Logged In User)
-    // ===============================
-    if (!userId) {
-      throw new Error("User ID required if not using query params");
-    }
-
-    profile = await UserAstrology.findOne({
-      userId,
-      relationshipToOwner: "self",
-    });
-
-    if (!profile) {
-      throw new Error("Astrology profile not found for user");
-    }
-
-    const {
-      name: profileName = "User",
-      birthDate,
-      birthTime,
-      birthPlace,
-      timezone,
-      preferredLanguage,
-    } = profile;
-
-    if (!birthDate || !birthTime || !birthPlace) {
-      throw new Error("Missing birth details in profile");
-    }
-
-    // DOB
-    const birthDateObj = new Date(birthDate);
-
-    dob = `${pad(birthDateObj.getDate())}-${pad(
-      birthDateObj.getMonth() + 1,
-    )}-${birthDateObj.getFullYear()}`;
-
-    // TOB
-    const [h, m] = convertTo24Hour(birthTime).split(":");
-
-    tob = `${pad(h)}:${pad(m)}`;
-
-    apiParams = {
-      dob,
-      tob,
-      tz: timezone || 5.5,
-      lang: preferredLanguage || "en",
-      name: profileName,
-      birthPlace: birthPlace.trim(),
-    };
-  }
-
-  logger.info(`Dasha API params: ${JSON.stringify(apiParams)}`);
-
-  // ===============================
-  // SAFE CACHE KEY (Guest Supported)
-  // ===============================
+  console.log("params for chart details:", params);
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
-    `dasha-${userId || "guest"}-${apiParams.lang}-${apiParams.name}-${dob}-${tob}-${apiParams.birthPlace}`,
-    userId || "guest",
+    `kundli-charts`,
+    userId,
+    JSON.stringify(params),
   );
 
   const cachedData = await CacheService.get(cacheKey);
-
   if (cachedData) {
-    logger.info(`Dasha Cache hit`);
+    logger.info(`Returning chart data from cache for userId=${userId}`);
     return cachedData;
   }
 
-  // ===============================
-  // CALL API
-  // ===============================
-  const apiUrl = API.DASHA(apiParams);
-
-  logger.info(`Fetching Dasha data from API: ${apiUrl}`);
-
-  const response = await axios.get(apiUrl, {
-    headers: getSaasHeaders(),
-    timeout: 15000,
+  const apiUrl = API.CHARTS({
+    ...params,
+    div: queryParams.div || "D1",
+    style: queryParams.style || "north",
   });
+  logger.info(`Fetching chart data from API: ${apiUrl}`);
 
-  logger.info(`Dasha data fetched successfully`);
+  const response = await callApi(apiUrl);
+  logger.info(`Chart data fetched successfully for userId=${userId}`);
 
-  // ===============================
-  // UPDATE DB (Only Logged User)
-  // ===============================
-  if (profile && response.data?.success) {
-    await updateUserAstrologyWithKundli(userId, response.data);
-  }
+  // if (!profile.isKundli) {
+  //   await profile.save();
+  //   logger.info(`Marked profile as Kundli generated for userId=${userId}`);
+  // }
 
-  // ===============================
-  // CACHE
-  // ===============================
+  // if (response.data?.success) {
+  //   await updateUserAstrologyWithKundli(userId, response.data);
+  // } else {
+  //   logger.warn(`Chart API response unsuccessful for userId=${userId}`);
+  // }
+
   await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
+  logger.info(`Cached chart data for userId=${userId} with 48 hours TTL`);
 
-  logger.info(`Cached Dasha`);
+  return response.data;
+};
+
+const getDasha = async (userId, queryParams = {}, isRelative = false) => {
+  const profile = await getProfile(userId, isRelative);
+  if (!profile) throw new Error("Astrology profile not found");
+
+  const params = normalizeParams(queryParams, profile);
+
+  const apiUrl = API.DASHA(params);
+
+  logger.info(`Fetching Dasha data from API (profile): ${apiUrl}`);
+
+  const response = await callApi(apiUrl);
+
+  // if (response.data?.success) {
+  //   await updateUserAstrologyWithKundli(userId, response.data);
+  // }
+
+  const cacheKey = CacheService.generateKey(
+    CacheService.CACHE_PREFIXES.USER_DETAILS,
+    `dasha-details`,
+    userId,
+    JSON.stringify(params),
+  );
+
+  await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
 
   return response.data;
 };
@@ -1131,188 +384,51 @@ const getAscendantReport = async (
   userId,
   queryParams = {},
   isRelative = false,
-  useQueryParams = false,
 ) => {
   try {
-    logger.info(
-      `getAscendantReport called userId=${userId}, isRelative=${isRelative}, useQueryParams=${useQueryParams}`,
-    );
-    const lang = queryParams.lang || "en";
-    if (
-      (queryParams.dob && queryParams.tob) ||
-      (queryParams.day &&
-        queryParams.month &&
-        queryParams.year &&
-        queryParams.hour &&
-        queryParams.min)
-    ) {
-      useQueryParams = true;
-    }
+    const profile = await getProfile(userId, isRelative);
+    if (!profile) throw new Error("Astrology profile not found");
 
-    const cleanTOB = (tob) => {
-      if (!tob) return null;
+    const params = normalizeParams(queryParams, profile);
+    // ================= CACHE KEY (AFTER DATA READY) =================
 
-      if (/^\d{1,2}:\d{1,2}:\d{1,2}$/.test(tob)) {
-        return tob.split(":").slice(0, 2).join(":");
-      }
-
-      if (/^\d{1,2}:\d{1,2}$/.test(tob)) {
-        return tob;
-      }
-
-      return null;
-    };
-    if (useQueryParams) {
-      const converted = convertToDobTob({
-        dob: queryParams.dob,
-        tob: queryParams.tob,
-        day: queryParams.day,
-        month: queryParams.month,
-        year: queryParams.year,
-        hour: queryParams.hour,
-        min: queryParams.min,
-      });
-
-      if (!converted) {
-        throw new Error("Invalid date/time in query params");
-      }
-
-      const finalTob = cleanTOB(converted.tob);
-      if (!finalTob) {
-        throw new Error("Invalid time format");
-      }
-
-      const finalTZ = queryParams.tz || 5.5;
-      const finalPlace = queryParams.birthPlace;
-      const finalName = queryParams.name || "User";
-
-      if (!finalPlace) {
-        throw new Error("Birth place is required");
-      }
-
-      const cacheKey = CacheService.generateKey(
-        CacheService.CACHE_PREFIXES.USER_DETAILS,
-        "ascendant",
-        lang,
-        converted.dob,
-        finalTob,
-        finalPlace,
-        finalTZ,
-        "guest",
-      );
-
-      const cached = await CacheService.get(cacheKey);
-      if (cached) {
-        logger.info("Ascendant returned from cache");
-        return cached;
-      }
-
-      // ================= API =================
-      const apiUrl = API.ASCENDANT_REPORT({
-        dob: converted.dob,
-        tob: finalTob,
-        birthPlace: finalPlace,
-        tz: finalTZ,
-        name: finalName,
-        lang,
-      });
-
-      logger.info(`[Ascendant] Fetching via query: ${apiUrl}`);
-
-      const response = await axios.get(apiUrl, {
-        headers: getSaasHeaders(),
-        // timeout: 15000,
-      });
-
-      await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
-
-      return response.data;
-    }
-
-    let profile = null;
-
-    if (isRelative) {
-      profile = await UserAstrology.findById(userId);
-    } else {
-      profile = await UserAstrology.findOne({
-        userId,
-        relationshipToOwner: "self",
-      });
-    }
-
-    if (!profile) {
-      throw new Error("Astrology profile not found");
-    }
-
-    if (!profile.birthDate || !profile.birthTime || !profile.birthPlace) {
-      throw new Error("Missing birth details in profile");
-    }
-
-    const converted = convertToDobTob({
-      dateObj: profile.birthDate,
-    });
-
-    if (!converted) {
-      throw new Error("Invalid DOB format");
-    }
-
-    const finalDob = converted.dob;
-
-    let finalTob = convertTo24Hour(profile.birthTime);
-    finalTob = cleanTOB(finalTob);
-
-    if (!finalTob) {
-      throw new Error("Invalid time format");
-    }
-
-    const finalTZ =
-      queryParams.tz ||
-      profile?.timezone ||
-      -new Date(profile.birthDate).getTimezoneOffset() / 60;
-
-    const finalPlace =
-      queryParams.birthPlace || profile.birthPlace.trim().split(",")[0];
-
-    const finalName = queryParams.name || profile.name || "User";
-
-    // ================= CACHE =================
     const cacheKey = CacheService.generateKey(
       CacheService.CACHE_PREFIXES.USER_DETAILS,
-      "ascendant",
-      lang,
-      finalDob,
-      finalTob,
-      finalPlace,
-      finalTZ,
+      `ascendant-${params}`,
       userId,
+      JSON.stringify(params),
     );
 
     const cached = await CacheService.get(cacheKey);
+
     if (cached) {
       logger.info("Ascendant returned from cache");
       return cached;
     }
 
     // ================= API =================
+
+    console.log("Params for Ascendant Report:", params);
+
     const apiUrl = API.ASCENDANT_REPORT({
-      dob: finalDob,
-      tob: finalTob,
-      birthPlace: finalPlace,
-      tz: finalTZ,
-      name: finalName,
-      lang,
+      ...params,
+      name: queryParams.name || profile?.name || "User",
     });
 
-    logger.info(`[Ascendant] Fetching via profile: ${apiUrl}`);
+    logger.info(`[Ascendant API] ${apiUrl}`);
 
-    const response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
+    const response = await callApi(apiUrl);
 
-    if (response.data?.success && !isRelative) {
-      await updateUserAstrologyWithKundli(userId, response.data);
-    }
+    // ================= UPDATE SELF =================
+
+    // if (response.data?.success && !isQuery) {
+    //   await updateUserAstrologyWithKundli(userId, response.data);
+    // }
+    // if (response.data?.success && userId && !isRelative) {
+    //   await updateUserAstrologyWithKundli(userId, response.data);
+    // }
+
+    // ================= SAVE CACHE =================
 
     await CacheService.set(cacheKey, response.data, 48 * 60 * 60);
 
@@ -1324,6 +440,7 @@ const getAscendantReport = async (
     throw err;
   }
 };
+
 const getMonthlyChoghadiya = async (userId, location, month, isQuery) => {
   logger.info(
     `getMonthlyChoghadiya called for userId=${userId}, location=${location}, month=${month}`,
@@ -1351,7 +468,7 @@ const getFullNumerology = async (userId, isQuery, queryParams = {}) => {
   try {
     logger.info(`getFullNumerology called for userId=${userId}`);
 
-    let { name, dob, tob, tz, birthplace, lang } = queryParams;
+    let { name, dob, tob, tz, birthplace } = queryParams;
 
     const userProvided = name || dob || tob || tz || birthplace;
 
@@ -1438,7 +555,6 @@ const getFullNumerology = async (userId, isQuery, queryParams = {}) => {
       tz,
       birthplace,
       name,
-      lang,
     );
 
     const cachedData = await CacheService.get(cacheKey);
@@ -1453,7 +569,6 @@ const getFullNumerology = async (userId, isQuery, queryParams = {}) => {
       tob: tob || "00:00",
       tz,
       birthplace,
-      lang: lang || "en",
     });
 
     logger.info(`[NUMEROLOGY] API URL => ${apiUrl}`);
@@ -1510,81 +625,48 @@ const getChoghadiya = async (userId, location, date, isQuery) => {
   logger.info(`Cached Choghadiya for userId=${userId}`);
   return response.data;
 };
-const getFullKundliData = async (userId, options = {}, isQuery = false) => {
+const getFullKundliData = async (
+  userId,
+  queryParams = {},
+  isRelative = false,
+) => {
   logger.info(
-    `getFullKundliData called for userId=${userId}, isQuery=${isQuery}`,
+    `getFullKundliData called for userId=${userId}, isRelative=${isRelative}`,
   );
 
-  let profile;
-  if (!isQuery) {
-    profile = await UserAstrology.findOne({
-      userId,
-      relationshipToOwner: "self",
-    });
-    if (!profile) throw new Error("Astrology profile not found for user");
-  } else {
-    profile = await UserAstrology.findById(userId);
-  }
+  const profile = await getProfile(userId, isRelative);
 
-  // ===============================
-  // DATE / TIME RESOLUTION
-  // ===============================
-  const dateObj =
-    options.year && options.month && options.day
-      ? new Date(`${options.year}-${options.month}-${options.day}`)
-      : profile
-        ? new Date(profile.birthDate)
-        : null;
+  console.log("User profile for Full Kundli Data:", profile);
 
-  const hourVal =
-    options.hour ||
-    (profile ? convertTo24Hour(profile.birthTime).split(":")[0] : "");
-  const minVal =
-    options.min ||
-    (profile ? convertTo24Hour(profile.birthTime).split(":")[1] : "");
+  const baseParams = normalizeParams(queryParams, profile);
 
-  // ===============================
-  // 🔁 INTERNAL CONVERSION → dob / tob
-  // ===============================
-  const dob = dateObj
-    ? `${formatWithLeadingZero(dateObj.getDate())}-${formatWithLeadingZero(
-        dateObj.getMonth() + 1,
-      )}-${dateObj.getFullYear()}`
-    : "";
+  console.log("Normalized Params for Full Kundli Data:", baseParams);
 
-  const tob = `${hourVal}:${minVal}`;
+  const div = queryParams.div || "D1";
+  const style = queryParams.style || "south";
 
-  // ===============================
-  // FINAL API PARAMS (dob / tob)
-  // ===============================
   const apiParams = {
-    dob,
-    tob,
-    tz: options.tz || (profile ? profile.timezone : 5.5),
-    lang: options.lang || (profile ? profile.preferredLanguage : "en"),
-    name: options.name || (profile ? profile.name : ""),
-    birthPlace:
-      options.birthPlace || (profile ? profile.birthPlace.trim() : ""),
-    div: options.div || "D1",
-    style: options.style || "south",
+    ...baseParams,
+    div,
+    style,
   };
 
-  logger.info(
-    `Sending FullKundli API request with params (converted): ${JSON.stringify(
-      apiParams,
-    )}`,
-  );
+  logger.info(`FullKundli normalized params: ${JSON.stringify(apiParams)}`);
 
+  // ======================================
+  // CACHE KEY
+  // ======================================
   const cacheKey = CacheService.generateKey(
     CacheService.CACHE_PREFIXES.USER_DETAILS,
-    `full-kundli-${userId}-${apiParams.lang}-${apiParams.div}-${apiParams.style}-${apiParams.name}-${dob}-${tob}-${apiParams.birthPlace}`,
+    "full-kundli",
     userId,
+    JSON.stringify(apiParams),
   );
 
-  const cachedData = await CacheService.get(cacheKey);
-  if (cachedData) {
-    logger.info(`Cache hit for userId=${userId}`);
-    return cachedData;
+  const cached = await CacheService.get(cacheKey);
+  if (cached) {
+    logger.info(`FullKundli cache hit for userId=${userId}`);
+    return cached;
   }
 
   // ===============================
@@ -1595,10 +677,7 @@ const getFullKundliData = async (userId, options = {}, isQuery = false) => {
     const apiUrl = API.FULL_KUNDLI(apiParams);
     logger.info(`FullKundli API URL: ${apiUrl}`);
 
-    const response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
+    const response = await callApi(apiUrl);
 
     fullKundliData = response.data;
   } catch (err) {
@@ -1606,60 +685,14 @@ const getFullKundliData = async (userId, options = {}, isQuery = false) => {
     throw err;
   }
 
-  // ===============================
-  // DOSHA
-  // ===============================
-  const doshaParams = {
-    dob,
-    tob,
-    birthPlace: apiParams.birthPlace,
-    tz: apiParams.tz,
-    lang: apiParams.lang,
-  };
-
-  logger.info(
-    `Sending Dosha API request with params: ${JSON.stringify(doshaParams)}`,
-  );
-
-  // const dosha = await getDosha(userId, null, doshaParams, true);
-
-  // ===============================
-  // TRANSIT PLANETS
-  // ===============================
-  const transitParams = {
-    ...doshaParams,
-    transit_date: options.transit_date || dob,
-    transit_time: options.transit_time || "00:00",
-    transitPlace: options.transitPlace || apiParams.birthPlace,
-    transit_tz: options.transit_tz || apiParams.tz,
-    house_type: "placidus",
-    zodiac_type: "sidereal",
-    direction: "p1_to_p2",
-  };
-
-  logger.info(
-    `Sending TransitPlanets API request with params: ${JSON.stringify(
-      transitParams,
-    )}`,
-  );
-
-  // const transitPlanets = await getTransitPlanets(
-  //   userId,
-  //   null,
-  //   transitParams,
-  //   true,
-  // );
-
   fullKundliData = {
     ...fullKundliData,
     data: {
       ...fullKundliData.data,
-      // dosha,
-      // transitPlanets,
     },
   };
 
-  if (!isQuery && profile && !profile.isKundli) {
+  if (!isRelative && profile && !profile.isKundli) {
     profile.isKundli = true;
     await profile.save();
   }
@@ -1771,8 +804,8 @@ module.exports = {
   getKundliData,
   getKundliDetailsData,
   getKPDetails,
-  getAshtakvargaCharts,
-  getCharts,
+  getAshtakvargaChartDetails,
+  getChartDetails,
   getDasha,
   getAscendantReport,
   getMonthlyChoghadiya,

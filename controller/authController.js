@@ -9,6 +9,7 @@ const {
 } = require("../services/communication/resetPasswordMail");
 const bcrypt = require("bcryptjs");
 const EmailService = require("../services/communication/emailService");
+const Astrologer = require("../models/Astrologer");
 function normalizeMobileInput(mobileNumber, countryCode) {
   if (!countryCode) {
     countryCode = "+91"; // default
@@ -418,3 +419,47 @@ exports.sendEmailOtp = async (req, res) => {
     });
   }
 };
+
+exports.logout = asyncHandler(async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const { deviceId } = req.body;
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      throw new UnauthorizedError("User not found");
+    }
+    const astrologerData = await Astrologer.findOne({ user_id: userId });
+    if (astrologerData) {
+      astrologerData.is_online = false;
+      await astrologerData.save();
+    }
+    // Remove device from devices array
+    if (deviceId) {
+      user.devices = user.devices.filter(
+        (device) => device.deviceId !== deviceId,
+      );
+    }
+    user.fcmToken = null;
+    // Clear session tracking
+    user.currentSessionId = null;
+    // Update last activity
+    user.lastLogin = new Date();
+    await user.save();
+    // Remove Redis presence (if you maintain online state)
+    try {
+      const redis = require("../utils/redis/redisClient");
+      await redis.del(`user_online:${userId}`);
+    } catch (err) {
+      logger.error("Redis cleanup failed:", err.message);
+    }
+
+    return res.json({
+      success: true,
+      message: "Logout successful",
+    });
+  } catch (err) {
+    next(err);
+  }
+});

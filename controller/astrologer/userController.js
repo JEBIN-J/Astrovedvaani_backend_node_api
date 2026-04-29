@@ -233,9 +233,9 @@ exports.getCompleteKundliByUserId = asyncHandler(async (req, res) => {
     // Use allSettled: Continues even if one fails
     const results = await Promise.allSettled([
       kundliService.getKundliData(targetUserId, {}, isRelative),
-      kundliService.getKundliDetailsData(targetUserId, isQuery, {}),
+      kundliService.getKundliDetailsData(targetUserId, {}, isRelative),
       kundliService.getKPDetails(targetUserId, {}, isRelative),
-      kundliService.getAshtakvargaCharts(
+      kundliService.getAshtakvargaChartDetails(
         targetUserId,
         "north",
         null,
@@ -245,19 +245,19 @@ exports.getCompleteKundliByUserId = asyncHandler(async (req, res) => {
         isQuery,
         isRelative,
       ),
-      kundliService.getCharts(
+      kundliService.getChartDetails(
         targetUserId,
-        "D1",
-        "north",
-        "en",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        isQuery,
+        // "D1",
+        // "north",
+        // "en",
+        // undefined,
+        // undefined,
+        // undefined,
+        // undefined,
+        {},
         isRelative,
       ),
-      kundliService.getDasha(targetUserId, false, {}, isRelative),
+      kundliService.getDasha(targetUserId, {}, isRelative),
       // getLaalKitaabData({
       //   userId: targetUserId,
       //   isRelative,

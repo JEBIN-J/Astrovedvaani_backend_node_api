@@ -65,7 +65,7 @@ const getAshtakvargaCharts = asyncHandler(async (req, res) => {
 
   console.log("Extracted Params:", { userId, queryParams, isRelative });
 
-  const kundliDetailsData = await kundliService.getAshtakvargaCharts(
+  const kundliDetailsData = await kundliService.getAshtakvargaChartDetails(
     userId,
     queryParams,
     isRelative,

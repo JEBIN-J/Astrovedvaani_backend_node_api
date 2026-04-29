@@ -25,7 +25,6 @@ router.get("/validate-token", authenticate, async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader.split(" ")[1];
 
-  // DB se sirf isOnboarded fetch karo
   const dbUser = await User.findById(user._id).select("isOnboarded").lean();
 
   console.log(user);
@@ -40,4 +39,5 @@ router.get("/validate-token", authenticate, async (req, res) => {
 });
 router.post("/send-email-otp", authController.sendEmailOtp);
 
+router.post("/logout", authenticate, authController.logout);
 module.exports = router;
