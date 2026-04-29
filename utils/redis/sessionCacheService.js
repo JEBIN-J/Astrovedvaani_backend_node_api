@@ -249,7 +249,7 @@ async function addUserToBusyWaitList(astrologerId, userId) {
 
 async function getAndClearBusyWaitList(astrologerId) {
   const key = `busy_waiting_users:${astrologerId}`;
-  const users = await redis.smembers(key);
+  const users = await redis.sMembers(key);
   await redis.del(key);
   return users;
 }

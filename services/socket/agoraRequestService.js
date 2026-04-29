@@ -144,6 +144,14 @@ function registerAgoraCallHandlers(socketManager, socket) {
         const targetSockets = socketManager.userSockets.get(
           astrologerId.toString(),
         );
+        let notificationPayload = {
+          priority: "high",
+          notification: {
+            // channelId: "fcm_fallback_notification_channel",
+            channelId: "audio_calls_v1",
+            sound: "hindi.mp3",
+          },
+        };
         if (targetSockets && targetSockets.size > 0) {
           logger.info(
             `[SOCKET] Sending ${serviceName} request via socket to astrologer ${astrologerId}`,
@@ -160,6 +168,7 @@ function registerAgoraCallHandlers(socketManager, socket) {
                 `Incoming ${serviceName}`,
                 payload.message,
                 payload,
+                notificationPayload,
               );
               logger.info(
                 `[SOCKET] Firebase push ${

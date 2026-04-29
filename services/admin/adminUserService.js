@@ -128,6 +128,11 @@ const completeUser = async (userId, data) => {
 
     if (data.profilePicture) userUpdate.profilePicture = data.profilePicture;
     if (data.gender) userUpdate.gender = data.gender;
+    if (data.password) {
+      const plainPassword = data.password;
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+      userUpdate.password = hashedPassword;
+    }
     // --- Validate specializations ---
     if (
       Array.isArray(data.specializations) &&

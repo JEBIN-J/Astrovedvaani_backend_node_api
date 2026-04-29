@@ -115,6 +115,14 @@ function handleChatRequestEvents(socketManager, socket) {
       };
       const targetSockets = socketManager.userSockets.get(astrologerId);
       let notifiedVia = "none";
+      let notificationPayload = {
+        priority: "high",
+        notification: {
+          // channelId: "fcm_fallback_notification_channel",
+          channelId: "chat_messages_v1",
+          sound: "hindi.mp3",
+        },
+      };
       if (targetSockets && targetSockets.size > 0) {
         logger.info(
           `[SOCKET] Sending chat request via socket to astrologer ${astrologerId}`,
@@ -131,6 +139,7 @@ function handleChatRequestEvents(socketManager, socket) {
               "New Chat Request",
               payload.message,
               payload,
+              notificationPayload,
             );
             logger.info(
               `[SOCKET] Firebase push ${pushSent ? "succeeded" : "failed"} for astrologer ${astrologerId}`,
@@ -345,22 +354,49 @@ function handleChatRequestEvents(socketManager, socket) {
             userId,
             "Auto-ended by system on duration expiry",
           );
+          const astroSockets = socketManager.userSockets.get(
+            updatedSession.astrologer_user_id.toString(),
+          );
+          let notificationPayload = {
+            priority: "high",
+            notification: {
+              // channelId: "fcm_fallback_notification_channel",
+              channelId: "session_ended_v1",
+              sound: "alert.mp3",
+            },
+          };
           if (result) {
-            socketManager.io
-              .to(`user_${result.session.user_id}`)
-              .emit("chat_auto_completed", {
-                sessionId: result.session._id,
-                timestamp: Date.now(),
-                message: "Session auto-completed after allotted duration.",
-              });
-            socketManager.io.to(`user_${userId}`).emit("chat_auto_completed", {
-              sessionId: result.session._id,
-              timestamp: Date.now(),
-              message: "Session auto-completed after allotted duration.",
-            });
-            logger.info(
-              `[SOCKET] Session ${sessionId} successfully auto-ended.`,
-            );
+            if (astroSockets && astroSockets.size > 0) {
+              socketManager.io
+                .to(`user_${result.session.user_id}`)
+                .emit("chat_auto_completed", {
+                  sessionId: result.session._id,
+                  timestamp: Date.now(),
+                  message: "Session auto-completed after allotted duration.",
+                });
+              socketManager.io
+                .to(`user_${userId}`)
+                .emit("chat_auto_completed", {
+                  sessionId: result.session._id,
+                  timestamp: Date.now(),
+                  message: "Session auto-completed after allotted duration.",
+                });
+              logger.info(
+                `[SOCKET] Session ${sessionId} successfully auto-ended.`,
+              );
+            } else {
+              console.log("enter");
+              logger.info(
+                `[SOCKET] Astrologer offline, sending push notification`,
+              );
+              await sendPushNotification(
+                session.astrologer_user_id,
+                "Chat Ended",
+                payload.message,
+                payload,
+                notificationPayload,
+              );
+            }
           }
         } catch (err) {
           logger.error(
@@ -820,10 +856,19 @@ function handleChatRequestEvents(socketManager, socket) {
       const astroSockets = socketManager.userSockets.get(
         session.astrologer_user_id.toString(),
       );
+      let notificationPayload = {
+        priority: "high",
+        notification: {
+          // channelId: "fcm_fallback_notification_channel",
+          channelId: "session_ended_v1",
+          sound: "alert.mp3",
+        },
+      };
       if (astroSockets && astroSockets.size > 0) {
         logger.info(
           `[SOCKET] Emitting chat_manually_ended to astrologer sockets`,
         );
+
         socketManager.io
           .to(`user_${session.astrologer_user_id}`)
           .emit("chat_manually_ended", payload);
@@ -834,6 +879,7 @@ function handleChatRequestEvents(socketManager, socket) {
           "Chat Ended",
           payload.message,
           payload,
+          notificationPayload,
         );
       }
 

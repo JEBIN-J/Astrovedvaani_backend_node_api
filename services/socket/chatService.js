@@ -6,19 +6,22 @@ const emitSocketError = require("../../utils/socketError");
 const sendPushNotification = require("../notification/sendNotification");
 
 function isMessageAllowed(content, mask = false) {
-  if (!content || typeof content !== "string") return { allowed: true, content };
+  if (!content || typeof content !== "string")
+    return { allowed: true, content };
 
   let safe = content;
   let processed = content.toLowerCase();
   let blocked = false;
 
-  const emailLoose = /([a-z0-9._%+-]+\s*[@]\s*[a-z0-9.-]+\s*[\.\]]\s*[a-z]{2,})/gi;
+  const emailLoose =
+    /([a-z0-9._%+-]+\s*[@]\s*[a-z0-9.-]+\s*[\.\]]\s*[a-z]{2,})/gi;
   if (emailLoose.test(processed)) {
     blocked = true;
     if (mask) safe = safe.replace(emailLoose, "XXX");
   }
 
-  const emailWords = /(at|@)\s*(gmail|yahoo|outlook|rediff|hotmail)\s*(dot|\.)\s*[a-z]{2,}/gi;
+  const emailWords =
+    /(at|@)\s*(gmail|yahoo|outlook|rediff|hotmail)\s*(dot|\.)\s*[a-z]{2,}/gi;
   if (emailWords.test(processed)) {
     blocked = true;
     if (mask) safe = safe.replace(emailWords, "XXX");
@@ -76,15 +79,31 @@ function handleChatEvents(socketManager, socket) {
     return;
   }
   const { userId, role } = socket.user;
-  socket.on("send_message",async ({ sessionId, receiverId, content, messageType, tempId }, callback) => {
+  socket.on(
+    "send_message",
+    async (
+      { sessionId, receiverId, content, messageType, tempId },
+      callback,
+    ) => {
       try {
-        const { getSession, getUser } = require("../../utils/redis/sessionCacheService");
+        const {
+          getSession,
+          getUser,
+        } = require("../../utils/redis/sessionCacheService");
         if (!sessionId || !receiverId || !content) {
-          return emitSocketError(socket, "MESSAGE_VALIDATION_FAILED", "Missing required fields");
+          return emitSocketError(
+            socket,
+            "MESSAGE_VALIDATION_FAILED",
+            "Missing required fields",
+          );
         }
         const session = await getSession(sessionId);
         if (!session || session.status !== Enums.SERVICE.STATUS.ONGOING) {
-          return emitSocketError(socket, "SESSION_INACTIVE", "Cannot send messages. Session is not active.");
+          return emitSocketError(
+            socket,
+            "SESSION_INACTIVE",
+            "Cannot send messages. Session is not active.",
+          );
         }
         // const allowedCheck = isMessageAllowed(content, true);
         // content = allowedCheck.content;
@@ -98,7 +117,7 @@ function handleChatEvents(socketManager, socket) {
             name: sender.name || sender.display_name || "Unknown",
             role: sender.role || role,
             profilePicture: sender.profilePicture || null,
-            display_name: sender.display_name || sender.name || null
+            display_name: sender.display_name || sender.name || null,
           },
           receiverId,
           content,
@@ -107,9 +126,16 @@ function handleChatEvents(socketManager, socket) {
             : Enums.COMMUNICATION.MESSAGE_TYPE.TEXT,
           isRead: false,
           createdAt: new Date(),
-          channelId: Enums.COMMUNICATION.CHANNEL.MESSAGE
+          channelId: Enums.COMMUNICATION.CHANNEL.MESSAGE,
         };
-
+        let notificationPayload = {
+          priority: "high",
+          notification: {
+            // channelId: "fcm_fallback_notification_channel",
+            channelId: "messages_v1",
+            sound: "ding.mp3",
+          },
+        };
         const receiverSockets = userSockets.get(receiverId);
         const delivered = receiverSockets && receiverSockets.size > 0;
         if (delivered) {
@@ -117,8 +143,13 @@ function handleChatEvents(socketManager, socket) {
             io.to(sockId).emit("new_message", messagePayload);
           }
         } else {
-          sendPushNotification(receiverId, "New Message", content, messagePayload)
-            .catch(err => logger.error("[SOCKET] Push failed:", err));
+          sendPushNotification(
+            receiverId,
+            "New Message",
+            content,
+            messagePayload,
+            notificationPayload,
+          ).catch((err) => logger.error("[SOCKET] Push failed:", err));
         }
         callback?.({ success: true, message: messagePayload });
         ChatMessage.create({
@@ -128,14 +159,14 @@ function handleChatEvents(socketManager, socket) {
           content,
           message_type: messagePayload.message_type,
           is_read: delivered,
-          read_at: delivered ? new Date() : null
-        }).catch(err => logger.error("[SOCKET] DB save failed:", err));
+          read_at: delivered ? new Date() : null,
+        }).catch((err) => logger.error("[SOCKET] DB save failed:", err));
       } catch (err) {
         logger.error("[SOCKET] send_message error:", err);
         emitSocketError(socket, "MESSAGE_SEND_ERROR", "Failed to send message");
         callback?.({ success: false });
       }
-    }
+    },
   );
   socket.on("typing", async ({ receiverId, sessionId, isTyping }) => {
     try {
@@ -158,7 +189,7 @@ function handleChatEvents(socketManager, socket) {
 
     await ChatMessage.updateMany(
       { _id: { $in: messageIds }, receiver_id: userId },
-      { $set: { is_read: true, read_at: new Date() } }
+      { $set: { is_read: true, read_at: new Date() } },
     );
   });
 }

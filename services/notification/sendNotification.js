@@ -11,7 +11,13 @@ const RESERVED_KEYS = [
   "ttl",
   "priority",
 ];
-async function sendPushNotification(userId, title, body, data = {}) {
+async function sendPushNotification(
+  userId,
+  title,
+  body,
+  data = {},
+  notificationPayload = {},
+) {
   logger.info(`[NOTIF] Sending push notification to userId: ${userId}`);
   const user = await User.findById(userId);
   if (!user) {
@@ -33,22 +39,22 @@ async function sendPushNotification(userId, title, body, data = {}) {
     token,
     notification: { title, body },
     data: sanitizedData,
-     android: {
-      priority: "high",
-      notification: {
-        channelId: "fcm_fallback_notification_channel",
-        sound: "tone.mp3",
-      },
-    },
+    android: notificationPayload,
+    // ios: notificationPayload,
   };
 
   try {
     const messaging = admin.messaging();
     const response = await messaging.send(message);
-    logger.info(`[NOTIF] Notification sent to user ${user.name}: success response :${response}`);
+    logger.info(
+      `[NOTIF] Notification sent to user ${user.name}: success response :${response}`,
+    );
     return true;
   } catch (err) {
-    logger.error(`[NOTIF] Error sending notification to user ${userId}: ${err.message}`, { stack: err.stack });
+    logger.error(
+      `[NOTIF] Error sending notification to user ${userId}: ${err.message}`,
+      { stack: err.stack },
+    );
     if (err.code === "messaging/registration-token-not-registered") {
       user.fcmToken = null;
       await user.save();
