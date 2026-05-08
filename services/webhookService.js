@@ -3,13 +3,13 @@ const Wallet = require("../models/Wallet");
 const WalletLedger = require("../models/Ledger");
 const Enums = require("../utils/constants");
 const logger = require("../utils/logger");
-const Razorpay = require('razorpay');
+const Razorpay = require("razorpay");
 const ThirdPartyIntegration = require("../models/ThirdPartyIntegration");
 const User = require("../models/User");
 const axios = require("axios");
 const redisClient = require("../utils/redis/redisClient");
-const walletNotification = require('../services/socket/walletNotification');
-const { getPhonePeClient } = require("../config/phonepeClient");
+const walletNotification = require("../services/socket/walletNotification");
+// const { getPhonePeClient } = require("../config/phonepeClient");
 
 exports.handleRazorpayWebhook = async (req) => {
   const provider = Enums.INTEGRATION.PROVIDER.RAZORPAY;
@@ -72,7 +72,7 @@ exports.handleRazorpayWebhook = async (req) => {
         payment_status: Enums.PAYMENT.STATUS.PENDING,
       },
       { $set: update },
-      { new: true }
+      { new: true },
     );
     if (!ledger) {
       logger.info("Ledger not found or already processed");
@@ -93,7 +93,7 @@ exports.handleRazorpayWebhook = async (req) => {
         ledger.credit_amount,
         oldBalance,
         wallet.balance,
-        "success"
+        "success",
       );
     }
     if (status === "failed") {
@@ -104,144 +104,144 @@ exports.handleRazorpayWebhook = async (req) => {
           ledger.amount,
           wallet.balance,
           wallet.balance,
-          "failed"
+          "failed",
         );
       }
     }
     logger.info(
-      `Webhook processed successfully | order=${order_id} status=${status}`
+      `Webhook processed successfully | order=${order_id} status=${status}`,
     );
   } catch (err) {
     logger.error("Unhandled Razorpay webhook error", err);
     return;
   }
 };
-exports.handlePhonepeWebhook = async (req) => {
-  try {
-    const rawBody = req.body;
-    const headers = req.headers;
+// exports.handlePhonepeWebhook = async (req) => {
+//   try {
+//     const rawBody = req.body;
+//     const headers = req.headers;
 
-    logger.info("[PhonePeWebhook] Received Headers:", headers);
-    logger.debug("[PhonePeWebhook] Raw Body:", rawBody.toString("utf8"));
+//     logger.info("[PhonePeWebhook] Received Headers:", headers);
+//     logger.debug("[PhonePeWebhook] Raw Body:", rawBody.toString("utf8"));
 
-    const authorization = headers["authorization"];
-    if (!authorization) throw new Error("Missing Authorization header");
+//     const authorization = headers["authorization"];
+//     if (!authorization) throw new Error("Missing Authorization header");
 
-    const provider = Enums.INTEGRATION.PROVIDER.PHONEPAY;
-    const redisKey = `phonepe_webhook_credentials_${provider}`;
-    let credentials = await redisClient.get(redisKey);
+//     const provider = Enums.INTEGRATION.PROVIDER.PHONEPAY;
+//     const redisKey = `phonepe_webhook_credentials_${provider}`;
+//     let credentials = await redisClient.get(redisKey);
 
-    if (credentials) {
-      credentials = JSON.parse(credentials);
-      logger.info("[Cache] PhonePe webhook credentials found in Redis");
-    } else {
-      logger.info("[Cache] Credentials not found in Redis, fetching from DB...");
-      const integration = await ThirdPartyIntegration.findOne({
-        provider,
-        type: Enums.INTEGRATION.TYPE.PAYMENT,
-        is_active: true,
-      });
-      if (!integration || !integration.extra_config?.username || !integration.extra_config?.password) {
-        logger.error("[PhonePeWebhook] Integration username/password missing");
-        throw new Error("PhonePe webhook credentials missing in DB");
-      }
-      credentials = {
-        username: integration.extra_config.username,
-        password: integration.extra_config.password,
-      };
-      await redisClient.setEx(redisKey, 3600, JSON.stringify(credentials));
-      logger.info("[Cache] PhonePe webhook credentials cached in Redis");
-    }
+//     if (credentials) {
+//       credentials = JSON.parse(credentials);
+//       logger.info("[Cache] PhonePe webhook credentials found in Redis");
+//     } else {
+//       logger.info("[Cache] Credentials not found in Redis, fetching from DB...");
+//       const integration = await ThirdPartyIntegration.findOne({
+//         provider,
+//         type: Enums.INTEGRATION.TYPE.PAYMENT,
+//         is_active: true,
+//       });
+//       if (!integration || !integration.extra_config?.username || !integration.extra_config?.password) {
+//         logger.error("[PhonePeWebhook] Integration username/password missing");
+//         throw new Error("PhonePe webhook credentials missing in DB");
+//       }
+//       credentials = {
+//         username: integration.extra_config.username,
+//         password: integration.extra_config.password,
+//       };
+//       await redisClient.setEx(redisKey, 3600, JSON.stringify(credentials));
+//       logger.info("[Cache] PhonePe webhook credentials cached in Redis");
+//     }
 
-    const { username, password } = credentials;
+//     const { username, password } = credentials;
 
-    const client = getPhonePeClient();
-    logger.info("[PhonePeWebhook] PhonePe Client Initialized");
+//     const client = getPhonePeClient();
+//     logger.info("[PhonePeWebhook] PhonePe Client Initialized");
 
-    const callbackResponse = client.validateCallback(
-      username,
-      password,
-      authorization,
-      rawBody.toString("utf8")
-    );
+//     const callbackResponse = client.validateCallback(
+//       username,
+//       password,
+//       authorization,
+//       rawBody.toString("utf8")
+//     );
 
-    logger.info("[PhonePeWebhook] Callback Validated Successfully", callbackResponse);
+//     logger.info("[PhonePeWebhook] Callback Validated Successfully", callbackResponse);
 
-    const { type, payload } = callbackResponse;
-    const { orderId, state, errorCode, detailedErrorCode } = payload;
+//     const { type, payload } = callbackResponse;
+//     const { orderId, state, errorCode, detailedErrorCode } = payload;
 
-    logger.info(
-      `[PhonePeWebhook] Parsed Payload: type=${type}, orderId=${orderId}, state=${state}`
-    );
+//     logger.info(
+//       `[PhonePeWebhook] Parsed Payload: type=${type}, orderId=${orderId}, state=${state}`
+//     );
 
-    // 🔹 Lookup ledger using external_transaction_id
-    const ledger = await WalletLedger.findOne({
-      external_transaction_id: orderId,
-      payment_status: Enums.PAYMENT.STATUS.PENDING,
-    });
+//     // 🔹 Lookup ledger using external_transaction_id
+//     const ledger = await WalletLedger.findOne({
+//       external_transaction_id: orderId,
+//       payment_status: Enums.PAYMENT.STATUS.PENDING,
+//     });
 
-    if (!ledger) {
-      logger.warn(`[PhonePeWebhook] Ledger not found for orderId=${orderId}`);
-      return { success: false, message: "Ledger not found" };
-    }
+//     if (!ledger) {
+//       logger.warn(`[PhonePeWebhook] Ledger not found for orderId=${orderId}`);
+//       return { success: false, message: "Ledger not found" };
+//     }
 
-    const wallet = await Wallet.findById(ledger.wallet_id);
-    if (!wallet) throw new Error("Wallet not found");
+//     const wallet = await Wallet.findById(ledger.wallet_id);
+//     if (!wallet) throw new Error("Wallet not found");
 
-    const oldBalance = wallet.balance;
-    const rechargeAmount = ledger.amount; // Use ledger amount, NOT payload
-    const bonusAmount = ledger.bonus_amount || 0;
+//     const oldBalance = wallet.balance;
+//     const rechargeAmount = ledger.amount; // Use ledger amount, NOT payload
+//     const bonusAmount = ledger.bonus_amount || 0;
 
-    if (state === "COMPLETED" || type === "CHECKOUT_ORDER_COMPLETED") {
-      wallet.balance += ledger.credit_amount || 0; // ledger.credit_amount includes bonus
-      wallet.last_updated = new Date();
-      await wallet.save();
+//     if (state === "COMPLETED" || type === "CHECKOUT_ORDER_COMPLETED") {
+//       wallet.balance += ledger.credit_amount || 0; // ledger.credit_amount includes bonus
+//       wallet.last_updated = new Date();
+//       await wallet.save();
 
-      ledger.payment_status = Enums.PAYMENT.STATUS.PAID;
-      ledger.remarks = "Recharge confirmed via PhonePe webhook";
-      ledger.timestamp = new Date();
-      await ledger.save();
+//       ledger.payment_status = Enums.PAYMENT.STATUS.PAID;
+//       ledger.remarks = "Recharge confirmed via PhonePe webhook";
+//       ledger.timestamp = new Date();
+//       await ledger.save();
 
-      const finalCredit = ledger.credit_amount || 0;
+//       const finalCredit = ledger.credit_amount || 0;
 
-      walletNotification.emitWalletUpdate(
-        wallet.user_id.toString(),
-        rechargeAmount,
-        oldBalance,
-        wallet.balance,
-        "success"
-      );
+//       walletNotification.emitWalletUpdate(
+//         wallet.user_id.toString(),
+//         rechargeAmount,
+//         oldBalance,
+//         wallet.balance,
+//         "success"
+//       );
 
-      logger.info(`[PhonePeWebhook] Payment SUCCESS:
-        walletId=${wallet._id}
-        oldBalance=${oldBalance}
-        newBalance=${wallet.balance}
-        rechargeAmount=${rechargeAmount}
-        bonusAmount=${bonusAmount}
-        finalCredit=${finalCredit}
-        ledgerId=${ledger._id}
-      `);
-    } else {
-      ledger.payment_status = Enums.PAYMENT.STATUS.FAILED;
-      ledger.remarks = `Recharge failed (state=${state}, code=${errorCode}, detailedCode=${detailedErrorCode})`;
-      ledger.timestamp = new Date();
-      await ledger.save();
+//       logger.info(`[PhonePeWebhook] Payment SUCCESS:
+//         walletId=${wallet._id}
+//         oldBalance=${oldBalance}
+//         newBalance=${wallet.balance}
+//         rechargeAmount=${rechargeAmount}
+//         bonusAmount=${bonusAmount}
+//         finalCredit=${finalCredit}
+//         ledgerId=${ledger._id}
+//       `);
+//     } else {
+//       ledger.payment_status = Enums.PAYMENT.STATUS.FAILED;
+//       ledger.remarks = `Recharge failed (state=${state}, code=${errorCode}, detailedCode=${detailedErrorCode})`;
+//       ledger.timestamp = new Date();
+//       await ledger.save();
 
-      logger.warn(`[PhonePeWebhook] Payment FAILED:
-        ledgerId=${ledger._id}
-        state=${state}
-        code=${errorCode}
-        detailedCode=${detailedErrorCode}
-      `);
-    }
+//       logger.warn(`[PhonePeWebhook] Payment FAILED:
+//         ledgerId=${ledger._id}
+//         state=${state}
+//         code=${errorCode}
+//         detailedCode=${detailedErrorCode}
+//       `);
+//     }
 
-    logger.info(`[PhonePeWebhook] Ledger updated successfully | ledgerId=${ledger._id}, status=${ledger.payment_status}`);
-    return { success: true };
-  } catch (error) {
-    logger.error("[PhonePeWebhook] Error processing webhook:", error);
-    throw error;
-  }
-};
+//     logger.info(`[PhonePeWebhook] Ledger updated successfully | ledgerId=${ledger._id}, status=${ledger.payment_status}`);
+//     return { success: true };
+//   } catch (error) {
+//     logger.error("[PhonePeWebhook] Error processing webhook:", error);
+//     throw error;
+//   }
+// };
 exports.createRazorpayFundAccount = async (astrologer) => {
   try {
     const integration = await ThirdPartyIntegration.findOne({
@@ -262,8 +262,9 @@ exports.createRazorpayFundAccount = async (astrologer) => {
       const user = await User.findById(astrologer.user_id);
 
       logger.info(
-        `📇 Creating Razorpay contact | name=${astrologer.display_name || user?.name
-        }, email=${user?.email}, phone=${user?.phone}`
+        `📇 Creating Razorpay contact | name=${
+          astrologer.display_name || user?.name
+        }, email=${user?.email}, phone=${user?.phone}`,
       );
 
       const contactRes = await axios.post(
@@ -274,7 +275,7 @@ exports.createRazorpayFundAccount = async (astrologer) => {
           contact: user?.phone,
           type: "customer",
         },
-        { auth }
+        { auth },
       );
 
       contactId = contactRes.data.id;
@@ -282,13 +283,13 @@ exports.createRazorpayFundAccount = async (astrologer) => {
 
       logger.info(`✅ Razorpay contact created | contactId=${contactId}`);
     }
-   if (
+    if (
       !astrologer.razorpay_fund_account_id &&
       astrologer.bank_account_number &&
       astrologer.ifsc
     ) {
       logger.info(
-        `Creating Razorpay fund account | contactId=${contactId}, ifsc=${astrologer.ifsc}, account=${astrologer.bank_account_number}`
+        `Creating Razorpay fund account | contactId=${contactId}, ifsc=${astrologer.ifsc}, account=${astrologer.bank_account_number}`,
       );
 
       const fundAccountRes = await axios.post(
@@ -302,24 +303,24 @@ exports.createRazorpayFundAccount = async (astrologer) => {
             account_number: astrologer.bank_account_number,
           },
         },
-        { auth }
+        { auth },
       );
 
       astrologer.razorpay_fund_account_id = fundAccountRes.data.id;
 
       logger.info(
-        `Razorpay fund account created | fundAccountId=${fundAccountRes.data.id}`
+        `Razorpay fund account created | fundAccountId=${fundAccountRes.data.id}`,
       );
     }
 
     await astrologer.save();
 
     logger.info(
-      `Astrologer updated with Razorpay details | astrologerId=${astrologer._id}`
+      `Astrologer updated with Razorpay details | astrologerId=${astrologer._id}`,
     );
   } catch (error) {
     logger.error(
-      `Error creating Razorpay fund account | astrologerId=${astrologer?._id}, message=${error.message}, stack=${error.stack}`
+      `Error creating Razorpay fund account | astrologerId=${astrologer?._id}, message=${error.message}, stack=${error.stack}`,
     );
     throw error;
   }

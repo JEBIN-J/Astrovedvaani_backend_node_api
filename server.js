@@ -3,7 +3,7 @@ require("dotenv").config({
     process.env.NODE_ENV === "production" ? ".env.production" : ".env.local",
 });
 
-const { initPhonePeClient } = require("./config/phonepeClient");
+// const { initPhonePeClient } = require("./config/phonepeClient");
 const ThirdPartyIntegration = require("./models/ThirdPartyIntegration");
 const Enums = require("./utils/constants");
 const redisClient = require("./utils/redis/redisClient");
