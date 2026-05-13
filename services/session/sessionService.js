@@ -5,14 +5,13 @@ const ConsultationSession = require('../../models/ConsultationSession');
 const { checkFreeSessionEligibility } = require('../admin/session/sessionSetting');
 const User = require('../../models/User');
 const logger = require('../../utils/logger');
-const { applyOffersOnRates } = require('../astrologer/astrologerOfferService');
 
 async function createChatSession({ userId, astrologerUserId, mode = Enums.SERVICE.TYPE.CHAT }) {
   try {
     await validateAstrologerAvailability(astrologerUserId, mode);
     logger.info(`[createChatSession] Start: userId=${userId}, astrologerUserId=${astrologerUserId}`);
     const astrologerDetails = await getAstrologerDetails(astrologerUserId, {
-      service_type: mode
+      service_type:mode
     });
     if (!astrologerDetails) {
       throw new Error('Astrologer not found or service not available');
@@ -21,41 +20,23 @@ async function createChatSession({ userId, astrologerUserId, mode = Enums.SERVIC
     if (!astrologer || !serviceRate?.rate) {
       throw new Error('Astrologer service rate not configured');
     }
-    console.log('serviceRate is ', serviceRate);
-
-    const [pricing] = await applyOffersOnRates(astrologer._id, [serviceRate]);
-    console.log('pricing is ', pricing);
-
-    if (!pricing) {
-      throw new Error('Failed to resolve pricing');
-    }
-
-    const rate = Number(pricing.final_rate);
-
+    const rate = Number(serviceRate.rate);
     if (isNaN(rate) || rate <= 0) {
-      throw new Error('Invalid final rate after applying offer');
+      throw new Error('Invalid service rate configured');
     }
-
-    logger.info(`[Pricing] Rate resolved`, {
-      astrologer_id: astrologer._id,
-      service_type: serviceRate.service_type,
-      base_rate: serviceRate.rate,
-      final_rate: rate,
-      discount_applied: pricing.discount_applied
-    });
     logger.info(`Found astrologer: ${astrologer._id}, rate: ₹${rate}`);
     const user = await User.findById(userId).lean();
     if (!user) throw new Error('User not found');
     const freeEligibility = await checkFreeSessionEligibility(user);
-    let freeDuration = 0;
-    let free = false;
+    let freeDuration=0;
+    let free=false;
     if (freeEligibility.eligible) {
       logger.info(`User eligible for free session of ${freeEligibility.duration} minutes`);
-      freeDuration = freeEligibility.duration;
-      free = true;
+      freeDuration= freeEligibility.duration;
+      free=true;
     }
     const walletEligibility = await userService.getWalletSessionEligibility(userId, rate);
-    if (!walletEligibility && !freeEligibility.duration) {
+    if (!walletEligibility&&!freeEligibility.duration) {
       throw new Error('Could not verify wallet eligibility');
     }
     const { eligible, wallet, maxDuration, reason } = walletEligibility;
@@ -95,8 +76,8 @@ async function createChatSession({ userId, astrologerUserId, mode = Enums.SERVIC
   }
 }
 
-async function createPaidSession({ userId, astrologer, astrologerUserId, rate, minutes, mode, commission_pct, free, freeDuration }) {
-  const { saveSession } = require('../../utils/redis/sessionCacheService'); // <- require inside function
+async function createPaidSession({ userId, astrologer, astrologerUserId, rate, minutes,mode,commission_pct,free,freeDuration }) {
+    const { saveSession } = require('../../utils/redis/sessionCacheService'); // <- require inside function
 
   if (!rate || rate <= 0) {
     throw new Error('Invalid rate provided for paid session');
@@ -133,13 +114,17 @@ async function createPaidSession({ userId, astrologer, astrologerUserId, rate, m
   });
 
   logger.info(`Paid session created: ${session._id} and mode :${mode}`);
-  const sessionCacheObject = {
+   const sessionCacheObject = {
     ...session.toObject(),
     success: true
   };
-  await saveSession(session._id, session.toObject());
 
+   const timestamp = Date.now();
 
+   console.log('timestamp is ',timestamp);
+    await saveSession(session._id, {...session.toObject(),timestamp});
+
+  
   return {
     success: true,
     session_id: session._id,
@@ -149,7 +134,8 @@ async function createPaidSession({ userId, astrologer, astrologerUserId, rate, m
     user_id: userId,
     start_time: session.start_time,
     total_amount: session.total_amount,
-    rate_per_minute: session.rate_per_minute
+    rate_per_minute: session.rate_per_minute,
+    timestamp,
   };
 }
 
@@ -161,11 +147,11 @@ async function handleAstroShareProcessing({ sessionId, astroShare, isFree }) {
     }
     logger.info(`[AstroShare] Processing astro share for session: ${sessionId}`);
     if (isFree) {
-      logger.info('[AstroShare]  astro share — session is free.');
-      session.astrologer_share_amount = 0;
+          logger.info('[AstroShare]  astro share — session is free.');
+          session.astrologer_share_amount = 0;
     }
-    else {
-      session.astrologer_share_amount = astroShare;
+    else{
+    session.astrologer_share_amount = astroShare;
     }
     await session.save();
   } catch (err) {
