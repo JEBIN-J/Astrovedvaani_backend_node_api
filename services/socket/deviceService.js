@@ -9,13 +9,16 @@ function handleDeviceEvents(socketManager, socket) {
   }
   const existingSockets = userSockets.get(userId);
   for (const entry of existingSockets) {
-    if (entry.sessionId === sessionId && entry.deviceId === deviceId) {
+    if (
+      entry.sessionId === sessionId &&
+      entry.deviceId === deviceId
+    ) {
       continue;
     }
     const oldSocket = io.sockets.sockets.get(entry.socketId);
     if (oldSocket) {
       logger.warn(
-        `[FORCE LOGOUT] user=${userId}, oldSession=${entry.sessionId}, newSession=${sessionId}`,
+        `[FORCE LOGOUT] user=${userId}, oldSession=${entry.sessionId}, newSession=${sessionId}`
       );
       oldSocket.emit("force_logout", {
         reason: "Logged in from another device",

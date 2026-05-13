@@ -20,8 +20,7 @@ const { registerWalletSocketManager } = require("../services/socket/walletNotifi
 const { setInSession, getInSession } = require("../utils/redis/sessionExtend");
 const { handleDeviceEvents } = require("../services/socket/deviceService");
 const { registerModerationSocketManager } = require("../services/socket/userModerationSocket");
-const { registerSocketManager } = require("../services/socket/realtimeOrPushNotifier");
-
+const sendPushNotification = require("../services/notification/sendNotification");
 
 class SocketManager {
   constructor() {
@@ -56,18 +55,17 @@ class SocketManager {
     registerLiveSocketManager(this);
     registerWalletSocketManager(this);
     registerModerationSocketManager(this);
-    registerSocketManager(this);
     this.io.on("connection", (socket) => {
-      if (!socket.user) {
-        logger.error(`[SOCKET] Unauthorized socket connection: ${socket.id}`);
-        socket.emit("auth_error", {
-          message: "Authentication required. Please login again."
-        });
-        setTimeout(() => {
-          socket.disconnect(true);
-        }, 300);
-        return;
-      }
+    if (!socket.user) {
+      logger.error(`[SOCKET] Unauthorized socket connection: ${socket.id}`);
+      socket.emit("auth_error", {
+        message: "Authentication required. Please login again."
+      });
+      setTimeout(() => {
+        socket.disconnect(true);
+      }, 300);
+      return;
+    }
 
       const { userId, role } = socket.user;
       logger.info(`Socket connected: ${socket.id}, userId=${userId}, role=${role}`);
@@ -112,6 +110,12 @@ class SocketManager {
               logger.warn(`[TIMEOUT] No ongoing session ${sessionId}`);
               return;
             }
+
+            if(session.mode === Enums.SERVICE.TYPE.CALL)
+            {
+              logger.info(`[TIMEOUT] Session ${sessionId} is a CALL, skipping auto-end on disconnect.`);
+              return;
+            }
             const userIn = await getInSession(sessionId, session.user_id);
             const astroIn = await getInSession(sessionId, session.astrologer_user_id);
             let stillDisconnected = false;
@@ -144,13 +148,40 @@ class SocketManager {
             this.clearActiveSession(session.user_id.toString(), session.astrologer_id.toString());
             await CacheService.clearAstrologerBusy(session.astrologer_user_id);
 
+            const timeouts = this.sessionTimeouts.get(sessionId);
+            if (timeouts) {
+              clearTimeout(timeouts.durationTimeout);
+              clearTimeout(timeouts.finalTimeout);
+            }
+
             this.sessionTimeouts.delete(sessionId);
             this.disconnectTimeouts.delete(disconnectKey);
-            [session.user_id, session.astrologer_user_id].forEach((uid) =>
-              this.io.to(`user_${uid}`).emit("chat_auto_completed", {
+            [session.user_id, session.astrologer_user_id].forEach((uid) => {
+              const targetSocketIds = this.userSockets.get(uid.toString());
+              if (targetSocketIds && targetSocketIds.size > 0) {
+                logger.info(`[TIMEOUT] Emitting chat_auto_completed to user_${uid}`);
+                this.io.to(`user_${uid}`).emit("chat_auto_completed", {
                 sessionId,
                 reason: "Chat ended due to disconnection timeout."
-              })
+              });
+              }
+              else {
+                logger.info(`[TIMEOUT] No active sockets for user_${uid}, sending push notification.`);
+                (async () => {
+                          try {
+                            const pushSent = await sendPushNotification(
+                              uid,
+                              "Chat Ended",
+                              "Your chat session has ended due to disconnection timeout.",
+                              { type: "chat_auto_completed", sessionId, channelId: 1008 }
+                            );
+                            logger.info(`[SOCKET] Firebase push ${pushSent ? 'succeeded' : 'failed'} for user ${uid}`);
+                          } catch (pushErr) {
+                            logger.error(`[SOCKET] Push notification failed for user ${uid}:`, pushErr);
+                          }
+                        })();
+                        logger.info(`[TIMEOUT] No active sockets for user_${uid}, emitted push notification event.`);
+               }}
             );
             logger.info(`[TIMEOUT] Auto-ended session ${sessionId}`);
             (async () => {
@@ -181,6 +212,7 @@ class SocketManager {
 
     return this.io;
   }
+
   async handleReconnectSessionCheck(userId) {
     for (const [key, timeout] of Array.from(this.disconnectTimeouts.entries())) {
       if (!key.endsWith(`_${userId}`)) continue;
@@ -195,6 +227,7 @@ class SocketManager {
       }
     }
   }
+
   trackConnection(userId, socketId, role) {
     userId = userId.toString();
     if (!this.userSockets.has(userId)) {
@@ -207,6 +240,7 @@ class SocketManager {
       .catch(err => logger.error(`[RECONNECT] Error`, err));
     this.userSockets.get(userId).add(socketId);
   }
+
   cleanup(userId, socketId, role) {
     userId = userId.toString();
     const sockets = this.userSockets.get(userId);
@@ -220,15 +254,18 @@ class SocketManager {
       }
     }
   }
+
   broadcastOnlineLists() {
     this.io.to("users").emit("online_astrologers", Array.from(this.onlineAstrologers));
     this.io.to("astrologers").emit("online_users", Array.from(this.onlineUsers));
     this.io.to("admins").emit("online_users", Array.from(this.onlineUsers));
     this.io.to("admins").emit("online_astrologers", Array.from(this.onlineAstrologers));
   }
+
   getActiveSession(userId) {
     return this.activeSessions.get(userId.toString());
   }
+
   setActiveSession(userId, astrologerId, sessionId) {
     this.activeSessions.set(userId.toString(), {
       astrologerId: astrologerId.toString(),
@@ -240,10 +277,10 @@ class SocketManager {
       sessionId,
     });
   }
+
   clearActiveSession(userId, astrologerId) {
     this.activeSessions.delete(userId.toString());
     this.activeSessions.delete(astrologerId.toString());
   }
 }
-
 module.exports = new SocketManager();
