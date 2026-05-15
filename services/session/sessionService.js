@@ -5,6 +5,7 @@ const ConsultationSession = require('../../models/ConsultationSession');
 const { checkFreeSessionEligibility } = require('../admin/session/sessionSetting');
 const User = require('../../models/User');
 const logger = require('../../utils/logger');
+const { applyOffersOnRates } = require('../astrologer/astrologerOfferService');
 
 async function createChatSession({ userId, astrologerUserId, mode = Enums.SERVICE.TYPE.CHAT }) {
   try {
@@ -20,10 +21,26 @@ async function createChatSession({ userId, astrologerUserId, mode = Enums.SERVIC
     if (!astrologer || !serviceRate?.rate) {
       throw new Error('Astrologer service rate not configured');
     }
-    const rate = Number(serviceRate.rate);
-    if (isNaN(rate) || rate <= 0) {
-      throw new Error('Invalid service rate configured');
+
+    const [pricing] = await applyOffersOnRates(astrologer._id, [serviceRate]);
+    console.log('pricing is ', pricing);
+
+    if (!pricing) {
+      throw new Error('Failed to resolve pricing');
     }
+    const rate = Number(pricing.final_rate);
+
+    if (isNaN(rate) || rate <= 0) {
+      throw new Error('Invalid final rate after applying offer');
+    }
+
+    logger.info(`[Pricing] Rate resolved`, {
+      astrologer_id: astrologer._id,
+      service_type: serviceRate.service_type,
+      base_rate: serviceRate.rate,
+      final_rate: rate,
+      discount_applied: pricing.discount_applied
+    });
     logger.info(`Found astrologer: ${astrologer._id}, rate: ₹${rate}`);
     const user = await User.findById(userId).lean();
     if (!user) throw new Error('User not found');
