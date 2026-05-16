@@ -261,7 +261,7 @@ function registerAgoraCallHandlers(socketManager, socket) {
       const userPayload = {
         sessionId: updatedSession._id,
         channelName,
-        name: astrologer?.name || '',
+        name: existingSession.astrologer_display_name || astrologer?.name || '',
         profilePicture: astrologer?.profilePicture || '',
         userToken,
         userUid,

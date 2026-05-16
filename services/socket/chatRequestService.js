@@ -4,7 +4,10 @@ const ConsultationSession = require("../../models/ConsultationSession");
 const userService = require("../../services/session/userService");
 const Enums = require("../../utils/constants");
 const { createChatSession } = require("../../services/session/sessionService");
-const { createLedgerEntriesForSession, finalizeSession } = require("../session/ledgerService");
+const {
+  createLedgerEntriesForSession,
+  finalizeSession,
+} = require("../session/ledgerService");
 const User = require("../../models/User");
 const Wallet = require("../../models/Wallet");
 const { isValidationAllowed } = require("../admin/validationSetting");
@@ -12,52 +15,86 @@ const sendPushNotification = require("../notification/sendNotification");
 const CacheService = require("../../utils/redis/cacheService");
 const { rollbackFreeSessionUsage } = require("../admin/session/sessionSetting");
 const { autoRejectSession } = require("./autoRejectService");
-const { getUserById } = require('../session/userService');
-const { incrementSessionExtended, isSessionExtended, getSessionExtendedCount, setInSession, clearInSession, getInSession } = require("../../utils/redis/sessionExtend");
-const kundliService = require("../../services/kundli/kundliService"); 
+const { getUserById } = require("../session/userService");
+const {
+  incrementSessionExtended,
+  isSessionExtended,
+  getSessionExtendedCount,
+  setInSession,
+  clearInSession,
+  getInSession,
+} = require("../../utils/redis/sessionExtend");
+const kundliService = require("../../services/kundli/kundliService");
+const { name } = require("ejs");
 
 function handleChatRequestEvents(socketManager, socket) {
   const { userId, role } = socket.user;
   logger.info(
     `[SOCKET] chatRequestService initialized for user ${userId} with role ${role}`,
   );
-  socket.on('chat_request_send', async ({ astrologerId }, callback) => {
+  socket.on("chat_request_send", async ({ astrologerId }, callback) => {
     try {
-      const { saveUser, getUser } = require("../../utils/redis/sessionCacheService");
-            const { emitAstrologerAvailability } = require("./handleAstrologerEvents");
-      logger.info(`[SOCKET] chat_request_send initiated by user ${userId} to astrologer ${astrologerId}`);
+      const {
+        saveUser,
+        getUser,
+      } = require("../../utils/redis/sessionCacheService");
+      const {
+        emitAstrologerAvailability,
+      } = require("./handleAstrologerEvents");
+      logger.info(
+        `[SOCKET] chat_request_send initiated by user ${userId} to astrologer ${astrologerId}`,
+      );
       if (role === Enums.USER.ROLE.ASTROLOGER) {
-        return callback?.({ success: false, message: 'Astrologers cannot initiate chat requests.' });
+        return callback?.({
+          success: false,
+          message: "Astrologers cannot initiate chat requests.",
+        });
       }
       if (!astrologerId || astrologerId === userId) {
-        return callback?.({ success: false, message: 'Invalid astrologer ID.' });
+        return callback?.({
+          success: false,
+          message: "Invalid astrologer ID.",
+        });
       }
       const busySessionId = await CacheService.isAstrologerBusy(astrologerId);
       if (busySessionId) {
-        return callback?.({ success: false, message: 'Astrologer is Busy' });
+        return callback?.({ success: false, message: "Astrologer is Busy" });
       }
       if (busySessionId) {
-        const { addUserToBusyWaitList } = require("../../utils/redis/sessionCacheService");
+        const {
+          addUserToBusyWaitList,
+        } = require("../../utils/redis/sessionCacheService");
         await addUserToBusyWaitList(astrologerId, userId);
 
         return callback?.({ success: false, message: "Astrologer is Busy" });
       }
       const allowed = await isValidationAllowed("ischatAllow");
       if (!allowed) {
-        return callback?.({ success: false, message: 'Chat Feature is Disabled.' });
+        return callback?.({
+          success: false,
+          message: "Chat Feature is Disabled.",
+        });
       }
-      const session = await createChatSession({ userId, astrologerUserId: astrologerId });
+      const session = await createChatSession({
+        userId,
+        astrologerUserId: astrologerId,
+      });
       (async () => {
-      try {
-        await kundliService.getCompleteKundliByUserId(userId);
-        logger.info(`[KUNDLI] Prefetch completed for user ${userId}`);
-      } catch (err) {
-        logger.error(`[KUNDLI] Prefetch failed for user ${userId}`, err);
-      }
-    })();
+        try {
+          await kundliService.getCompleteKundliByUserId(userId);
+          logger.info(`[KUNDLI] Prefetch completed for user ${userId}`);
+        } catch (err) {
+          logger.error(`[KUNDLI] Prefetch failed for user ${userId}`, err);
+        }
+      })();
       if (!session.success) {
-        logger.error(`[SOCKET] chat_request_send failed to create session: ${session.error}`);
-        return callback?.({ success: false, message: session.error || 'Unable to create chat session.' });
+        logger.error(
+          `[SOCKET] chat_request_send failed to create session: ${session.error}`,
+        );
+        return callback?.({
+          success: false,
+          message: session.error || "Unable to create chat session.",
+        });
       }
       let user = await getUser(userId);
       if (!user) {
@@ -66,11 +103,11 @@ function handleChatRequestEvents(socketManager, socket) {
           await saveUser(userId, user);
         }
       }
-      console.log('timestamp in payload ',session.timestamp);
+      console.log("timestamp in payload ", session.timestamp);
       const payload = {
         from: userId,
-        name: user?.name || 'Unknown',
-        profilePicture: user?.profilePicture || '',
+        name: user?.name || "Unknown",
+        profilePicture: user?.profilePicture || "",
         sessionId: session.session_id,
         chatId: session.chat_id,
         duration: session.duration,
@@ -83,26 +120,35 @@ function handleChatRequestEvents(socketManager, socket) {
 
       await CacheService.markAstrologerBusy(astrologerId, session.session_id);
       const targetSockets = socketManager.userSockets.get(astrologerId);
-      let notifiedVia = 'none';
+      let notifiedVia = "none";
       // if (targetSockets && targetSockets.size > 0) {
-        logger.info(`[SOCKET] Sending chat request via socket to astrologer ${astrologerId}`);
-        socketManager.io.to(`user_${astrologerId}`).emit('chat_request_received', payload);
-        notifiedVia = 'socket';
+      logger.info(
+        `[SOCKET] Sending chat request via socket to astrologer ${astrologerId}`,
+      );
+      socketManager.io
+        .to(`user_${astrologerId}`)
+        .emit("chat_request_received", payload);
+      notifiedVia = "socket";
       // } else {
-        (async () => {
-          try {
-            const pushSent = await sendPushNotification(
-              astrologerId,
-              "New Chat Request",
-              payload.message,
-              payload
-            );
-            logger.info(`[SOCKET] Firebase push ${pushSent ? 'succeeded' : 'failed'} for astrologer ${astrologerId}`);
-          } catch (pushErr) {
-            logger.error(`[SOCKET] Push notification failed for astrologer ${astrologerId}:`, pushErr);
-          }
-        })();
-        notifiedVia = 'push';
+      (async () => {
+        try {
+          const pushSent = await sendPushNotification(
+            astrologerId,
+            "New Chat Request",
+            payload.message,
+            payload,
+          );
+          logger.info(
+            `[SOCKET] Firebase push ${pushSent ? "succeeded" : "failed"} for astrologer ${astrologerId}`,
+          );
+        } catch (pushErr) {
+          logger.error(
+            `[SOCKET] Push notification failed for astrologer ${astrologerId}:`,
+            pushErr,
+          );
+        }
+      })();
+      notifiedVia = "push";
       // }
       emitAstrologerAvailability({
         astrologer_user_id: astrologerId,
@@ -113,38 +159,49 @@ function handleChatRequestEvents(socketManager, socket) {
         success: true,
         sessionId: session.session_id,
         duration: session.duration,
-        notifiedVia
+        notifiedVia,
       });
-
     } catch (err) {
       logger.error(`[SOCKET] chat_request_send error for user ${userId}:`, err);
-      return emitSocketError(socket, 'chat_request_error', 'Failed to send chat request.');
+      return emitSocketError(
+        socket,
+        "chat_request_error",
+        "Failed to send chat request.",
+      );
     }
   });
-   socket.on("chat_request_cancel", async ({ sessionId, reason }, callback) => {
+  socket.on("chat_request_cancel", async ({ sessionId, reason }, callback) => {
     try {
-      const { getSession, clearSession } = require("../../utils/redis/sessionCacheService");
-            const { emitAstrologerAvailability } = require("./handleAstrologerEvents");
+      const {
+        getSession,
+        clearSession,
+      } = require("../../utils/redis/sessionCacheService");
+      const {
+        emitAstrologerAvailability,
+      } = require("./handleAstrologerEvents");
 
-
-      logger.info(`[SOCKET] chat_request_cancel userId=${userId} sessionId=${sessionId}`);
+      logger.info(
+        `[SOCKET] chat_request_cancel userId=${userId} sessionId=${sessionId}`,
+      );
 
       if (role !== Enums.USER.ROLE.USER) {
         return emitSocketError(
           socket,
           "chat_cancel_error",
-          "Only users can cancel chat requests."
+          "Only users can cancel chat requests.",
         );
       }
 
       const session = await getSession(sessionId);
-      logger.info(`[SOCKET] Session fetched for cancellation: ${JSON.stringify(session)}`);
+      logger.info(
+        `[SOCKET] Session fetched for cancellation: ${JSON.stringify(session)}`,
+      );
 
       if (!session || session.status !== Enums.SERVICE.STATUS.PENDING) {
         return emitSocketError(
           socket,
           "chat_cancel_error",
-          "Invalid or expired session."
+          "Invalid or expired session.",
         );
       }
 
@@ -155,17 +212,18 @@ function handleChatRequestEvents(socketManager, socket) {
 
       await CacheService.clearAstrologerBusy(session.astrologer_user_id);
 
-      const targetSockets = socketManager.userSockets.get(session.astrologer_user_id);
-      let notifiedVia = 'none';
+      const targetSockets = socketManager.userSockets.get(
+        session.astrologer_user_id,
+      );
+      let notifiedVia = "none";
 
-
-      let commununicationMode = 'none';
-      if(session.mode === Enums.SERVICE.TYPE.CHAT) {
-        commununicationMode = 'chat';
-      } else if(session.mode === Enums.SERVICE.TYPE.CALL) {
-        commununicationMode = 'call';
-      }else if (session.mode === Enums.SERVICE.TYPE.VIDEO) {
-        commununicationMode = 'video call';
+      let commununicationMode = "none";
+      if (session.mode === Enums.SERVICE.TYPE.CHAT) {
+        commununicationMode = "chat";
+      } else if (session.mode === Enums.SERVICE.TYPE.CALL) {
+        commununicationMode = "call";
+      } else if (session.mode === Enums.SERVICE.TYPE.VIDEO) {
+        commununicationMode = "video call";
       }
 
       // Notify astrologer immediately
@@ -179,33 +237,42 @@ function handleChatRequestEvents(socketManager, socket) {
           timestamp: Date.now(),
           message: `User has cancelled the ${commununicationMode} request.`,
         });
-        notifiedVia = 'socket';
+      notifiedVia = "socket";
       // }else {
-        (async () => {
-          try {            
-              const pushSent = await sendPushNotification(
-              session.astrologer_user_id,
-              "Request Cancelled",
-              `User has cancelled the ${commununicationMode} request.`,
-              { sessionId, reason: cancelReason, channelId: 1008 }
-            );
-            logger.info(`[SOCKET] Firebase push ${pushSent ? 'succeeded' : 'failed'} for cancellation to astrologer ${session.astrologer_user_id}`);
-          } catch (pushErr) {
-            logger.error(`[SOCKET] Push notification failed for cancellation to astrologer ${session.astrologer_user_id}:`, pushErr);
-          }
-        })();
+      (async () => {
+        try {
+          const pushSent = await sendPushNotification(
+            session.astrologer_user_id,
+            "Request Cancelled",
+            `User has cancelled the ${commununicationMode} request.`,
+            { sessionId, reason: cancelReason, channelId: 1008 },
+          );
+          logger.info(
+            `[SOCKET] Firebase push ${pushSent ? "succeeded" : "failed"} for cancellation to astrologer ${session.astrologer_user_id}`,
+          );
+        } catch (pushErr) {
+          logger.error(
+            `[SOCKET] Push notification failed for cancellation to astrologer ${session.astrologer_user_id}:`,
+            pushErr,
+          );
+        }
+      })();
 
-        notifiedVia = 'push';
+      notifiedVia = "push";
       // }
 
-      console.log(`Notified astrologer ${session.astrologer_user_id} of cancellation via ${notifiedVia}`);
+      console.log(
+        `Notified astrologer ${session.astrologer_user_id} of cancellation via ${notifiedVia}`,
+      );
 
-        emitAstrologerAvailability({
-          astrologer_user_id: session.astrologer_user_id,
-          is_busy: false,
-        });
+      emitAstrologerAvailability({
+        astrologer_user_id: session.astrologer_user_id,
+        is_busy: false,
+      });
 
-      logger.info(`[SOCKET] chat_request_cancelled emitted to user_${session.astrologer_user_id}`);
+      logger.info(
+        `[SOCKET] chat_request_cancelled emitted to user_${session.astrologer_user_id}`,
+      );
 
       // Respond immediately to user
       callback?.({ success: true });
@@ -219,38 +286,62 @@ function handleChatRequestEvents(socketManager, socket) {
               status: Enums.SERVICE.STATUS.CANCELLED,
               cancellation_reason: cancelReason,
             },
-            { new: true }
+            { new: true },
           );
-          logger.info(`[SOCKET] Session ${sessionId} updated to CANCELLED in DB.`);
+          logger.info(
+            `[SOCKET] Session ${sessionId} updated to CANCELLED in DB.`,
+          );
         } catch (err) {
-          logger.error(`[SOCKET] Failed to update session ${sessionId} in DB:`, err);
+          logger.error(
+            `[SOCKET] Failed to update session ${sessionId} in DB:`,
+            err,
+          );
         }
       })();
-
     } catch (err) {
       logger.error("[SOCKET] chat_request_cancel error:", err);
       return emitSocketError(
         socket,
         "chat_cancel_error",
-        "Internal error during cancellation."
+        "Internal error during cancellation.",
       );
     }
   });
   socket.on("chat_request_accept", async ({ sessionId }, callback) => {
     try {
-      const { getSession, updateSession, clearSession, getUser, saveUser } = require("../../utils/redis/sessionCacheService");
-      const { emitAstrologerAvailability } = require("./handleAstrologerEvents");
+      const {
+        getSession,
+        updateSession,
+        clearSession,
+        getUser,
+        saveUser,
+      } = require("../../utils/redis/sessionCacheService");
+      const {
+        emitAstrologerAvailability,
+      } = require("./handleAstrologerEvents");
 
       if (role !== Enums.USER.ROLE.ASTROLOGER) {
-        return emitSocketError(socket, "chat_accept_error", "Only astrologers can accept chat requests.");
+        return emitSocketError(
+          socket,
+          "chat_accept_error",
+          "Only astrologers can accept chat requests.",
+        );
       }
       const session = await getSession(sessionId);
-      logger.info(`[SOCKET] Session fetched for acceptance: ${JSON.stringify(session)}`);
+      logger.info(
+        `[SOCKET] Session fetched for acceptance: ${JSON.stringify(session)}`,
+      );
       if (!session || session.status !== Enums.SERVICE.STATUS.PENDING) {
-        return emitSocketError(socket, "chat_accept_error", "Invalid or expired session.");
+        return emitSocketError(
+          socket,
+          "chat_accept_error",
+          "Invalid or expired session.",
+        );
       }
       const now = new Date();
-      const billableEnd = new Date(now.getTime() + session.duration_minutes * 60000);
+      const billableEnd = new Date(
+        now.getTime() + session.duration_minutes * 60000,
+      );
       const updatedSession = await ConsultationSession.findByIdAndUpdate(
         sessionId,
         {
@@ -259,7 +350,7 @@ function handleChatRequestEvents(socketManager, socket) {
           start_time: now,
           end_time: billableEnd,
         },
-        { new: true }
+        { new: true },
       );
       await updateSession(sessionId, updatedSession.toObject());
       await setInSession(sessionId, updatedSession.user_id, true);
@@ -289,52 +380,69 @@ function handleChatRequestEvents(socketManager, socket) {
       const durationMs = updatedSession.duration_minutes * 60 * 1000;
       const bufferMs = 60000;
       logger.info(
-        `[SOCKET] chat_request_accept → Session ${sessionId} started. Duration=${updatedSession.duration_minutes} min, auto-timeout in ${(durationMs + bufferMs) / 1000}s (includes 60s buffer).`
+        `[SOCKET] chat_request_accept → Session ${sessionId} started. Duration=${updatedSession.duration_minutes} min, auto-timeout in ${(durationMs + bufferMs) / 1000}s (includes 60s buffer).`,
       );
       const durationTimeout = setTimeout(() => {
         logger.info(
-          `[SOCKET] Session ${sessionId} duration completed. Entering ${bufferMs / 1000}s buffer period for recharge/extension.`
+          `[SOCKET] Session ${sessionId} duration completed. Entering ${bufferMs / 1000}s buffer period for recharge/extension.`,
         );
-        socketManager.io.to(`user_${updatedSession.astrologer_user_id}`).emit("session_duration_completed", {
-          sessionId,  
-          timestamp: Date.now(),
-          message: "Session duration completed. Please wait while we process the session.",
-        });
+        socketManager.io
+          .to(`user_${updatedSession.astrologer_user_id}`)
+          .emit("session_duration_completed", {
+            sessionId,
+            timestamp: Date.now(),
+            message:
+              "Session duration completed. Please wait while we process the session.",
+          });
       }, durationMs);
       const finalTimeout = setTimeout(async () => {
         try {
-          logger.info(`[SOCKET] Session ${sessionId} auto-timeout reached. Finalizing session...`);
+          logger.info(
+            `[SOCKET] Session ${sessionId} auto-timeout reached. Finalizing session...`,
+          );
           socketManager.clearActiveSession(
             updatedSession.user_id.toString(),
-            updatedSession.astrologer_user_id.toString()
+            updatedSession.astrologer_user_id.toString(),
           );
           socketManager.sessionTimeouts.delete(sessionId);
-          await CacheService.clearAstrologerBusy(updatedSession.astrologer_user_id);
+          await CacheService.clearAstrologerBusy(
+            updatedSession.astrologer_user_id,
+          );
           await clearSession(sessionId);
           await clearInSession(sessionId);
           const result = await finalizeSession(
             sessionId,
             userId,
-            "Auto-ended by system on duration expiry"
+            "Auto-ended by system on duration expiry",
           );
           if (result) {
-            socketManager.io.to(`user_${result.session.user_id}`).emit("chat_auto_completed", {
-              sessionId: result.session._id,
-              timestamp: Date.now(),
-              message: "Session auto-completed after allotted duration.",
-            });
+            socketManager.io
+              .to(`user_${result.session.user_id}`)
+              .emit("chat_auto_completed", {
+                sessionId: result.session._id,
+                timestamp: Date.now(),
+                message: "Session auto-completed after allotted duration.",
+              });
             socketManager.io.to(`user_${userId}`).emit("chat_auto_completed", {
               sessionId: result.session._id,
               timestamp: Date.now(),
               message: "Session auto-completed after allotted duration.",
             });
-            logger.info(`[SOCKET] Session ${sessionId} successfully auto-ended.`);
+            logger.info(
+              `[SOCKET] Session ${sessionId} successfully auto-ended.`,
+            );
           }
         } catch (err) {
-          logger.error(`[SOCKET] Error while finalizing auto-timeout for session ${sessionId}:`, err);
+          logger.error(
+            `[SOCKET] Error while finalizing auto-timeout for session ${sessionId}:`,
+            err,
+          );
         }
       }, durationMs + bufferMs);
-      socketManager.sessionTimeouts.set(sessionId, { durationTimeout, finalTimeout });
+      socketManager.sessionTimeouts.set(sessionId, {
+        durationTimeout,
+        finalTimeout,
+      });
       const chatAcceptedPayload = {
         astrologerId: userId,
         astrologer_id: updatedSession.astrologer_id,
@@ -351,35 +459,39 @@ function handleChatRequestEvents(socketManager, socket) {
         message: "Your chat request has been accepted.",
       };
 
-      socketManager.io.to(`user_${updatedSession.user_id}`).emit("chat_request_accepted", {
-        astrologerId: userId,
-        astrologer_id: updatedSession.astrologer_id,
-        name: astrologer.name,
-        profilePicture: astrologer?.profilePicture || '',
-        sessionId: updatedSession._id,
-        chatId: updatedSession.chat_id,
-        duration: updatedSession.duration_minutes,
-        ratePerMinute: updatedSession.rate_per_minute,
-        totalAmount: updatedSession.total_amount,
-        startTime: updatedSession.start_time,
-        timestamp: Date.now(),
-        message: "Your chat request has been accepted.",
-      });
-      socketManager.io.to(`user_${updatedSession.astrologer_user_id}`).emit("chat_request_accepted", {
-        astrologerId: userId,
-        from: updatedSession.user_id,
-        name: reqUser.name,
-        profilePicture: reqUser?.profilePicture || "",
-        astrologer_id: updatedSession.astrologer_id,
-        sessionId: updatedSession._id,
-        chatId: updatedSession.chat_id,
-        duration: updatedSession.duration_minutes,
-        ratePerMinute: updatedSession.rate_per_minute,
-        totalAmount: updatedSession.total_amount,
-        startTime: updatedSession.start_time,
-        timestamp: Date.now(),
-        message: "Your chat request has been accepted.",
-      });
+      socketManager.io
+        .to(`user_${updatedSession.user_id}`)
+        .emit("chat_request_accepted", {
+          astrologerId: userId,
+          astrologer_id: updatedSession.astrologer_id,
+          name: session?.astrologer_display_name || astrologer.name,
+          profilePicture: astrologer?.profilePicture || "",
+          sessionId: updatedSession._id,
+          chatId: updatedSession.chat_id,
+          duration: updatedSession.duration_minutes,
+          ratePerMinute: updatedSession.rate_per_minute,
+          totalAmount: updatedSession.total_amount,
+          startTime: updatedSession.start_time,
+          timestamp: Date.now(),
+          message: "Your chat request has been accepted.",
+        });
+      socketManager.io
+        .to(`user_${updatedSession.astrologer_user_id}`)
+        .emit("chat_request_accepted", {
+          astrologerId: userId,
+          from: updatedSession.user_id,
+          name: reqUser.name,
+          profilePicture: reqUser?.profilePicture || "",
+          astrologer_id: updatedSession.astrologer_id,
+          sessionId: updatedSession._id,
+          chatId: updatedSession.chat_id,
+          duration: updatedSession.duration_minutes,
+          ratePerMinute: updatedSession.rate_per_minute,
+          totalAmount: updatedSession.total_amount,
+          startTime: updatedSession.start_time,
+          timestamp: Date.now(),
+          message: "Your chat request has been accepted.",
+        });
       emitAstrologerAvailability({
         astrologer_user_id: updatedSession.astrologer_user_id,
         is_busy: true,
@@ -387,10 +499,14 @@ function handleChatRequestEvents(socketManager, socket) {
       callback?.({ success: true, session: chatAcceptedPayload });
     } catch (err) {
       logger.error("[SOCKET] chat_request_accept error:", err);
-      return emitSocketError(socket, "chat_accept_error", "Internal error during accept.");
+      return emitSocketError(
+        socket,
+        "chat_accept_error",
+        "Internal error during accept.",
+      );
     }
   });
- socket.on("chat_session_extend", async ({ sessionId }, callback) => {
+  socket.on("chat_session_extend", async ({ sessionId }, callback) => {
     try {
       const {
         getSession,
@@ -555,17 +671,23 @@ function handleChatRequestEvents(socketManager, socket) {
 
       let graceTimeMs = 0;
 
-      if(now > new Date(session.end_time)){
+      if (now > new Date(session.end_time)) {
         graceTimeMs = now - new Date(session.end_time);
       }
 
-      console.log(`previous end time: ${session.end_time}, now: ${now}, graceTimeMs: ${graceTimeMs}`);
-
-      const newEndTime = new Date(
-        new Date(session.end_time).getTime() + additionalMinutes * 60000 + graceTimeMs,
+      console.log(
+        `previous end time: ${session.end_time}, now: ${now}, graceTimeMs: ${graceTimeMs}`,
       );
 
-      console.log(`Grace time (ms): ${graceTimeMs}, New end time: ${newEndTime}`);
+      const newEndTime = new Date(
+        new Date(session.end_time).getTime() +
+          additionalMinutes * 60000 +
+          graceTimeMs,
+      );
+
+      console.log(
+        `Grace time (ms): ${graceTimeMs}, New end time: ${newEndTime}`,
+      );
 
       // =========================================================
       // UPDATE DB
@@ -622,13 +744,18 @@ function handleChatRequestEvents(socketManager, socket) {
           `[EXTEND TIMER] Session ${sessionId} reached scheduled end time`,
         );
 
-        console.log(`Emitting session_duration_completed for session ${sessionId} at ${new Date().toISOString()} for astrologer ${session.astrologer_user_id}`);
+        console.log(
+          `Emitting session_duration_completed for session ${sessionId} at ${new Date().toISOString()} for astrologer ${session.astrologer_user_id}`,
+        );
 
-        socketManager.io.to(`user_${session.astrologer_user_id}`).emit("session_duration_completed", {
-          sessionId,  
-          timestamp: Date.now(),
-          message: "Session duration completed. Please wait while we process the session.",
-        });
+        socketManager.io
+          .to(`user_${session.astrologer_user_id}`)
+          .emit("session_duration_completed", {
+            sessionId,
+            timestamp: Date.now(),
+            message:
+              "Session duration completed. Please wait while we process the session.",
+          });
       }, actualRemainingMs);
 
       // =========================================================
@@ -764,7 +891,11 @@ function handleChatRequestEvents(socketManager, socket) {
   });
   socket.on("chat_request_reject", async ({ sessionId, reason }, callback) => {
     try {
-      const { getSession, updateSession, clearSession } = require("../../utils/redis/sessionCacheService");
+      const {
+        getSession,
+        updateSession,
+        clearSession,
+      } = require("../../utils/redis/sessionCacheService");
 
       logger.info(
         `[SOCKET] chat_request_reject userId=${userId} sessionId=${sessionId}`,
@@ -793,7 +924,10 @@ function handleChatRequestEvents(socketManager, socket) {
           try {
             // await rollbackFreeSessionUsage(session.user_id, null);
           } catch (err) {
-            logger.error(`Background rollbackFreeSessionUsage failed for user ${session.user_id}:`, err);
+            logger.error(
+              `Background rollbackFreeSessionUsage failed for user ${session.user_id}:`,
+              err,
+            );
           }
         })();
       }
@@ -809,13 +943,14 @@ function handleChatRequestEvents(socketManager, socket) {
           status: Enums.SERVICE.STATUS.REJECTED,
           rejection_reason: rejectionReason,
         },
-        { new: true }
+        { new: true },
       );
       socketManager.io
         .to(`user_${session.user_id}`)
         .emit("chat_request_rejected", {
           astrologerId: userId,
           sessionId,
+          name: session?.astrologer_display_name || "Astrologer",
           reason: rejectionReason,
           timestamp: Date.now(),
           message: "Your chat request has been rejected.",
@@ -834,32 +969,58 @@ function handleChatRequestEvents(socketManager, socket) {
     }
   });
   socket.on("chat_session_end", async ({ sessionId }, callback) => {
-    logger.info(`[SOCKET] chat_session_end called for sessionId=${sessionId} by userId=${userId}`);
+    logger.info(
+      `[SOCKET] chat_session_end called for sessionId=${sessionId} by userId=${userId}`,
+    );
 
     try {
-      const { getSession, updateSession, clearSession } = require("../../utils/redis/sessionCacheService");
+      const {
+        getSession,
+        updateSession,
+        clearSession,
+      } = require("../../utils/redis/sessionCacheService");
 
       const session = await getSession(sessionId);
-      logger.info(`[SOCKET] Fetched session from cache: ${JSON.stringify(session, null, 2)}`);
+      logger.info(
+        `[SOCKET] Fetched session from cache: ${JSON.stringify(session, null, 2)}`,
+      );
 
       if (!session) {
         logger.warn(`[SOCKET] Session not found for sessionId=${sessionId}`);
         return emitSocketError(socket, "chat_end_error", "Session not found.");
       }
 
-      if (![session.user_id.toString(), session.astrologer_user_id.toString()].includes(userId.toString())) {
-        logger.warn(`[SOCKET] Unauthorized chat end attempt by userId=${userId} for sessionId=${sessionId}`);
-        return emitSocketError(socket, "chat_end_error", "Unauthorized action.");
+      if (
+        ![
+          session.user_id.toString(),
+          session.astrologer_user_id.toString(),
+        ].includes(userId.toString())
+      ) {
+        logger.warn(
+          `[SOCKET] Unauthorized chat end attempt by userId=${userId} for sessionId=${sessionId}`,
+        );
+        return emitSocketError(
+          socket,
+          "chat_end_error",
+          "Unauthorized action.",
+        );
       }
 
-      logger.info(`[SOCKET] Clearing astrologer busy status for astrologerId=${session.astrologer_user_id}`);
+      logger.info(
+        `[SOCKET] Clearing astrologer busy status for astrologerId=${session.astrologer_user_id}`,
+      );
       await CacheService.clearAstrologerBusy(session.astrologer_user_id);
 
       logger.info(`[SOCKET] Clearing session cache for sessionId=${sessionId}`);
       await clearSession(sessionId);
       await clearInSession(sessionId);
-      logger.info(`[SOCKET] Clearing active session references and deleting session timeout`);
-      socketManager.clearActiveSession(session.user_id.toString(), session.astrologer_user_id.toString());
+      logger.info(
+        `[SOCKET] Clearing active session references and deleting session timeout`,
+      );
+      socketManager.clearActiveSession(
+        session.user_id.toString(),
+        session.astrologer_user_id.toString(),
+      );
       const timeouts = socketManager.sessionTimeouts.get(sessionId);
       if (timeouts) {
         clearTimeout(timeouts.durationTimeout);
@@ -872,23 +1033,41 @@ function handleChatRequestEvents(socketManager, socket) {
         endedBy: userId,
         timestamp: Date.now(),
         message: "Chat session ended manually.",
-        channelId: session.mode
+        channelId: session.mode,
       };
 
       logger.info(`[SOCKET] Emitting chat_manually_ended to user socket`);
-      socketManager.io.to(`user_${session.user_id}`).emit("chat_manually_ended", payload);
+      socketManager.io
+        .to(`user_${session.user_id}`)
+        .emit("chat_manually_ended", payload);
 
-      const astroSockets = socketManager.userSockets.get(session.astrologer_user_id.toString());
+      const astroSockets = socketManager.userSockets.get(
+        session.astrologer_user_id.toString(),
+      );
       if (astroSockets && astroSockets.size > 0) {
-        logger.info(`[SOCKET] Emitting chat_manually_ended to astrologer sockets`);
-        socketManager.io.to(`user_${session.astrologer_user_id}`).emit("chat_manually_ended", payload);
+        logger.info(
+          `[SOCKET] Emitting chat_manually_ended to astrologer sockets`,
+        );
+        socketManager.io
+          .to(`user_${session.astrologer_user_id}`)
+          .emit("chat_manually_ended", payload);
       } else {
         logger.info(`[SOCKET] Astrologer offline, sending push notification`);
-        await sendPushNotification(session.astrologer_user_id, "Chat Ended", payload.message, payload);
+        await sendPushNotification(
+          session.astrologer_user_id,
+          "Chat Ended",
+          payload.message,
+          payload,
+        );
       }
 
-      logger.info(`[SOCKET] Callback sent to client for sessionId=${sessionId}`);
-      callback?.({ success: true, message: "Session ended and notifications sent." });
+      logger.info(
+        `[SOCKET] Callback sent to client for sessionId=${sessionId}`,
+      );
+      callback?.({
+        success: true,
+        message: "Session ended and notifications sent.",
+      });
 
       // --- Background finalize ---
       (async () => {
@@ -898,7 +1077,9 @@ function handleChatRequestEvents(socketManager, socket) {
           logger.info(`[Session] Session extension count: ${extensionCount}`);
           const session = await ConsultationSession.findById(sessionId);
           if (!session) {
-            logger.warn(`[SOCKET] Session not found for sessionId=${sessionId}`);
+            logger.warn(
+              `[SOCKET] Session not found for sessionId=${sessionId}`,
+            );
             return;
           }
           if (extensionCount > 1) {
@@ -906,23 +1087,35 @@ function handleChatRequestEvents(socketManager, socket) {
             await session.save();
           } else {
             if (!session.end_time || now < session.end_time) {
-              logger.info(`[SOCKET] Updating session end_time to now: ${now.toISOString()} for sessionId=${sessionId}`);
+              logger.info(
+                `[SOCKET] Updating session end_time to now: ${now.toISOString()} for sessionId=${sessionId}`,
+              );
               session.end_time = now;
               await session.save();
             } else {
-              logger.info(`[SOCKET] End time already passed, not updating end_time for sessionId=${sessionId}`);
+              logger.info(
+                `[SOCKET] End time already passed, not updating end_time for sessionId=${sessionId}`,
+              );
             }
           }
-          logger.info(`[SOCKET] finalizeSession completed for sessionId=${sessionId}`);
+          logger.info(
+            `[SOCKET] finalizeSession completed for sessionId=${sessionId}`,
+          );
           await finalizeSession(sessionId, userId);
         } catch (err) {
-          logger.error("[SOCKET] chat_session_end background finalize error:", err);
+          logger.error(
+            "[SOCKET] chat_session_end background finalize error:",
+            err,
+          );
         }
       })();
-
     } catch (err) {
       logger.error("[SOCKET] chat_session_end error:", err);
-      return emitSocketError(socket, "chat_end_error", "Failed to end session.");
+      return emitSocketError(
+        socket,
+        "chat_end_error",
+        "Failed to end session.",
+      );
     }
   });
   socket.on("chat_session_rejoin", async ({ sessionId }, callback) => {
@@ -931,17 +1124,25 @@ function handleChatRequestEvents(socketManager, socket) {
 
       const session = await getSession(sessionId);
       if (!session || session.status !== Enums.SERVICE.STATUS.ONGOING) {
-        return callback?.({ success: false, message: "Invalid or inactive session." });
+        return callback?.({
+          success: false,
+          message: "Invalid or inactive session.",
+        });
       }
 
       // IMPORTANT: Mark the user as IN-SESSION
       await setInSession(sessionId, userId, true);
-      logger.info(`[SessionFlag] sessionId=${sessionId} userId=${userId} inSession set to TRUE (rejoin)`);
+      logger.info(
+        `[SessionFlag] sessionId=${sessionId} userId=${userId} inSession set to TRUE (rejoin)`,
+      );
 
       const now = new Date();
       const remainingMs = new Date(session.end_time) - now;
       if (remainingMs <= 0) {
-        return callback?.({ success: false, message: "Session already expired." });
+        return callback?.({
+          success: false,
+          message: "Session already expired.",
+        });
       }
 
       const remainingMinutes = Math.max(0, Math.floor(remainingMs / 60000));
@@ -959,13 +1160,19 @@ function handleChatRequestEvents(socketManager, socket) {
         timestamp: Date.now(),
         message: "Session rejoined successfully.",
       };
-      socketManager.io.to(`user_${session.user_id}`).emit("chat_session_rejoined", payload);
-      socketManager.io.to(`user_${session.astrologer_user_id}`).emit("chat_session_rejoined", payload);
+      socketManager.io
+        .to(`user_${session.user_id}`)
+        .emit("chat_session_rejoined", payload);
+      socketManager.io
+        .to(`user_${session.astrologer_user_id}`)
+        .emit("chat_session_rejoined", payload);
       callback?.({ success: true, session: payload });
-
     } catch (err) {
       logger.error("[SOCKET] chat_session_rejoin error:", err);
-      return callback?.({ success: false, message: "Failed to rejoin session." });
+      return callback?.({
+        success: false,
+        message: "Failed to rejoin session.",
+      });
     }
   });
   socket.on("kundli_activity", async ({ sessionId, activity, tab }) => {
@@ -1000,18 +1207,22 @@ function handleChatRequestEvents(socketManager, socket) {
       }
 
       logger.info(
-        `[SOCKET] kundli_activity → ${activity} (${tab}) session=${sessionId}`
+        `[SOCKET] kundli_activity → ${activity} (${tab}) session=${sessionId}`,
       );
     } catch (err) {
       logger.error("[SOCKET] kundli_activity error", err);
     }
   });
-    socket.on("is_session_active", async ({ sessionId }, callback) => {
-    logger.info(`[SOCKET] is_session_active called for sessionId=${sessionId} by userId=${userId}`);
+  socket.on("is_session_active", async ({ sessionId }, callback) => {
+    logger.info(
+      `[SOCKET] is_session_active called for sessionId=${sessionId} by userId=${userId}`,
+    );
     try {
       const { getSession } = require("../../utils/redis/sessionCacheService");
       const session = await getSession(sessionId);
-      logger.info(`[SOCKET] Fetched session from cache: ${JSON.stringify(session)}`);
+      logger.info(
+        `[SOCKET] Fetched session from cache: ${JSON.stringify(session)}`,
+      );
       if (!session) {
         return callback?.({
           success: true,
@@ -1019,13 +1230,13 @@ function handleChatRequestEvents(socketManager, socket) {
           isMember: false,
         });
       }
-      const isMember =
-        [session.user_id?.toString(), session.astrologer_user_id?.toString()].includes(
-          userId.toString()
-        );
+      const isMember = [
+        session.user_id?.toString(),
+        session.astrologer_user_id?.toString(),
+      ].includes(userId.toString());
       if (!isMember) {
         logger.warn(
-          `[SOCKET] User ${userId} is not member of sessionId=${sessionId}`
+          `[SOCKET] User ${userId} is not member of sessionId=${sessionId}`,
         );
         return callback?.({
           success: true,
@@ -1047,6 +1258,5 @@ function handleChatRequestEvents(socketManager, socket) {
       });
     }
   });
-
 }
 module.exports = handleChatRequestEvents;
