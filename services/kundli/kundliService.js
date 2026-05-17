@@ -750,6 +750,81 @@ const getCoordinatesByLocation = async (locationName) => {
   return { lat, lon: lng, address: formattedAddress };
 };
 
+
+const getLocationSuggestions = async (input) => {
+  try {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) throw new Error("Google API key missing");
+
+    // Step 1: Autocomplete with new API
+    const url = "https://places.googleapis.com/v1/places:autocomplete";
+    const response = await axios.post(
+      url,
+      {
+        input,
+        includedPrimaryTypes: ["locality"], // Restrict to cities/localities
+        languageCode: "en",
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": apiKey,
+          "X-Goog-FieldMask": "suggestions.placePrediction.text.text,suggestions.placePrediction.placeId", // Include placeId for details
+        },
+      }
+    );
+
+    const predictions = response.data.suggestions?.map((s) => ({
+      text: s.placePrediction.text.text,
+      placeId: s.placePrediction.placeId,
+    })) || [];
+
+    if (!predictions.length) throw new Error("No suggestions found");
+
+    // Step 2: Fetch details for each prediction in parallel (limit to 5)
+    const results = await Promise.all(
+      predictions.slice(0, 5).map(async (pred) => {
+        try {
+          const detailsResponse = await axios.get(
+            `https://places.googleapis.com/v1/places/${pred.placeId}`,
+            {
+              headers: {
+                "X-Goog-Api-Key": apiKey,
+                "X-Goog-FieldMask": "location,formattedAddress", // Get lat/lon and address
+              },
+            }
+          );
+          const { latitude, longitude } = detailsResponse.data.location || {};
+          return {
+            address: detailsResponse.data.formattedAddress || pred.text,
+            lat: latitude,
+            lon: longitude,
+          };
+        } catch (detailsError) {
+          console.error(`Error fetching details for place ${pred.placeId}:`, detailsError.message);
+          return {
+            address: pred.text,
+            lat: null,
+            lon: null,
+          };
+        }
+      })
+    );
+
+    // Filter out failed details fetches
+    return results.filter(r => r.lat && r.lon);
+  } catch (error) {
+    console.error("Error fetching location suggestions:", error.message);
+    if (error.response) {
+      console.error(
+        "Google API Error Details:",
+        JSON.stringify(error.response.data, null, 2)
+      );
+    }
+    throw error;
+  }
+};
+
 const getCompleteKundliByUserId = async (userId) => {
   logger.info(
     `[getCompleteKundliByUserId] Service STARTED for userId=${userId}`,
@@ -815,4 +890,5 @@ module.exports = {
   getLocationByCoordinates,
   getCoordinatesByLocation,
   getCompleteKundliByUserId,
+  getLocationSuggestions,
 };

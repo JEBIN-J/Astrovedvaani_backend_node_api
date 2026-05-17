@@ -228,7 +228,7 @@ const getSuggestions = async (req, res) => {
         .json({ success: false, message: "Input parameter is required" });
     }
 
-    const data = await getLocationSuggestions(input);
+    const data = await kundliService.getLocationSuggestions(input);
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

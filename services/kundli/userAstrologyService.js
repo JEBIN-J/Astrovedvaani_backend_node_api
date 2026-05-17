@@ -148,53 +148,129 @@ const deleteKundli = async (userId, kundliId) => {
   return kundli;
 };
 
-const getCitySuggestion = async (key) => {
+// const getCitySuggestion = async (key) => {
+//   try {
+//     logger.info(`Fetching city suggestions for key="${key}"`);
+//     const suggestionRes = await axios.get(API.LOCATION_SUGGESTIONS(key));
+//     const suggestionData = suggestionRes.data;
+//     if (!suggestionData.success) {
+//       logger.warn(`No suggestions found for key="${key}"`);
+//       return { success: false, data: [] };
+//     }
+//     const suggestions = suggestionData.data || [];
+//     logger.info(`Found ${suggestions.length} suggestions for key="${key}"`);
+//     const detailedSuggestions = await Promise.all(
+//       suggestions.map(async (s) => {
+//         try {
+//           logger.info(`Fetching location details for address="${s.address}"`);
+//           const locRes = await axios.get(API.LOCATION_BY_NAME(s.address));
+
+//           const locData = locRes.data;
+
+//           const location = locData.data?.[0];
+
+//           logger.info(
+//             `Got location: lat=${location?.lat}, lon=${location?.lon} for "${s.address}"`,
+//           );
+
+//           return {
+//             address: location?.address || s.address,
+//             latitude: location?.lat || null,
+//             longitude: location?.lon || null,
+//           };
+//         } catch (err) {
+//           logger.error(
+//             `Failed to fetch location for "${s.address}": ${err.message}`,
+//           );
+//           return { address: s.address, latitude: null, longitude: null };
+//         }
+//       }),
+//     );
+//     logger.info(
+//       `Successfully built ${detailedSuggestions.length} detailed suggestions`,
+//     );
+//     return { success: true, data: detailedSuggestions };
+//   } catch (err) {
+//     logger.error(`getCitySuggestion error: ${err.message}`);
+//     return { success: false, data: [] };
+//   }
+// };
+
+
+const getCitySuggestion = async (input) => {
   try {
-    logger.info(`Fetching city suggestions for key="${key}"`);
-    const suggestionRes = await axios.get(API.LOCATION_SUGGESTIONS(key));
-    const suggestionData = suggestionRes.data;
-    if (!suggestionData.success) {
-      logger.warn(`No suggestions found for key="${key}"`);
-      return { success: false, data: [] };
-    }
-    const suggestions = suggestionData.data || [];
-    logger.info(`Found ${suggestions.length} suggestions for key="${key}"`);
-    const detailedSuggestions = await Promise.all(
-      suggestions.map(async (s) => {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) throw new Error("Google API key missing");
+
+    // Step 1: Autocomplete with new API
+    const url = "https://places.googleapis.com/v1/places:autocomplete";
+    const response = await axios.post(
+      url,
+      {
+        input,
+        includedPrimaryTypes: ["locality"], // Restrict to cities/localities
+        languageCode: "en",
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": apiKey,
+          "X-Goog-FieldMask": "suggestions.placePrediction.text.text,suggestions.placePrediction.placeId", // Include placeId for details
+        },
+      }
+    );
+
+    const predictions = response.data.suggestions?.map((s) => ({
+      text: s.placePrediction.text.text,
+      placeId: s.placePrediction.placeId,
+    })) || [];
+
+    if (!predictions.length) throw new Error("No suggestions found");
+
+    // Step 2: Fetch details for each prediction in parallel (limit to 5)
+    const results = await Promise.all(
+      predictions.slice(0, 5).map(async (pred) => {
         try {
-          logger.info(`Fetching location details for address="${s.address}"`);
-          const locRes = await axios.get(API.LOCATION_BY_NAME(s.address));
-
-          const locData = locRes.data;
-
-          const location = locData.data?.[0];
-
-          logger.info(
-            `Got location: lat=${location?.lat}, lon=${location?.lon} for "${s.address}"`,
+          const detailsResponse = await axios.get(
+            `https://places.googleapis.com/v1/places/${pred.placeId}`,
+            {
+              headers: {
+                "X-Goog-Api-Key": apiKey,
+                "X-Goog-FieldMask": "location,formattedAddress", // Get lat/lon and address
+              },
+            }
           );
-
+          const { latitude, longitude } = detailsResponse.data.location || {};
           return {
-            address: location?.address || s.address,
-            latitude: location?.lat || null,
-            longitude: location?.lon || null,
+            address: detailsResponse.data.formattedAddress || pred.text,
+            lat: latitude,
+            lon: longitude,
           };
-        } catch (err) {
-          logger.error(
-            `Failed to fetch location for "${s.address}": ${err.message}`,
-          );
-          return { address: s.address, latitude: null, longitude: null };
+        } catch (detailsError) {
+          console.error(`Error fetching details for place ${pred.placeId}:`, detailsError.message);
+          return {
+            address: pred.text,
+            lat: null,
+            lon: null,
+          };
         }
-      }),
+      })
     );
-    logger.info(
-      `Successfully built ${detailedSuggestions.length} detailed suggestions`,
-    );
-    return { success: true, data: detailedSuggestions };
-  } catch (err) {
-    logger.error(`getCitySuggestion error: ${err.message}`);
-    return { success: false, data: [] };
+
+    // Filter out failed details fetches
+    return results.filter(r => r.lat && r.lon);
+  } catch (error) {
+    console.error("Error fetching location suggestions:", error.message);
+    if (error.response) {
+      console.error(
+        "Google API Error Details:",
+        JSON.stringify(error.response.data, null, 2)
+      );
+    }
+    throw error;
   }
 };
+
 
 const updateUserAstrologyWithKundli = async (userId, kundliData, isQuery) => {
   logger.info(`updateUserAstrologyWithKundli called for userId=${userId}`);
