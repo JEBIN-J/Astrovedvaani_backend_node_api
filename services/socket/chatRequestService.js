@@ -678,6 +678,8 @@ function handleChatRequestEvents(socketManager, socket) {
         graceTimeMs = now - new Date(session.end_time);
       }
 
+      const totalBufferTime = (session.total_buffer_time || 0) + graceTimeMs;
+
       console.log(
         `previous end time: ${session.end_time}, now: ${now}, graceTimeMs: ${graceTimeMs}`,
       );
@@ -705,6 +707,8 @@ function handleChatRequestEvents(socketManager, socket) {
             end_time: newEndTime,
 
             last_extended_at: now,
+
+            total_buffer_time: totalBufferTime,
           },
         },
         { new: true },

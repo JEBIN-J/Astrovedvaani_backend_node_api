@@ -156,6 +156,7 @@ async function createPaidSession({
     commission_pct,
     is_free: free,
     freeDuration,
+    total_buffer_time: 0,
   });
 
   logger.info(`Paid session created: ${session._id} and mode :${mode}`);

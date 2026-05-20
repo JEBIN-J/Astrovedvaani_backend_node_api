@@ -32,6 +32,7 @@ async function createLedgerEntriesForSession(sessionId) {
     const billableMinutes = Math.max(0, duration_minutes - freeUsed);
     const ratePerMin = rate_per_minute || 0;
     const finalAmount = Number((billableMinutes * ratePerMin).toFixed(2));
+    console.log(`[Ledger] Session ${sessionId} - Duration: ${duration_minutes}min, Free used: ${freeUsed}min, Billable: ${billableMinutes}min, Rate/min: ${ratePerMin}, Final amount: ${finalAmount}`);
     const [userWallet, astroWallet] = await Promise.all([
       Wallet.findOne({ user_id }),
       Wallet.findOne({ user_id: astrologer_user_id }),
@@ -81,6 +82,7 @@ async function createLedgerEntriesForSession(sessionId) {
     const astroOpen = astroWallet.balance;
     const superAdminOpen = superAdminWallet.balance;
     const userClose = Number((userOpen - finalAmount).toFixed(2));
+    console.log(`[Ledger] User wallet - Open: ${userOpen}, Debit: ${finalAmount}, Close: ${userClose}`);
     if (userClose < 0) throw new Error("Insufficient wallet balance");
     const astroClose = Number((astroOpen + astrologerAmount).toFixed(2));
     const superAdminClose = Number(
@@ -204,7 +206,10 @@ async function finalizeSession(sessionId, endedBy, forcedEndReason = null) {
   logger.info(
     `[Session] Start time: ${startTime.toISOString()}, End time for calculation: ${endTime.toISOString()}`,
   );
-  const actualDurationMs = endTime - startTime;
+
+  console.log(`Session times - start: ${startTime}, end: ${endTime}, buffer time: ${session.total_buffer_time || 0}ms`,
+  );
+  const actualDurationMs = endTime - startTime - (session.total_buffer_time || 0) ;
   const totalConsumedMinutes = Math.ceil(actualDurationMs / 60000);
   logger.info(`[Session] Actual duration in ms: ${actualDurationMs}, totalConsumedMinutes (rounded): ${totalConsumedMinutes}`,);
   const freeDuration = session.freeDuration ?? 0;

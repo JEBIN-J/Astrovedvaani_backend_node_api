@@ -27,6 +27,7 @@ const consultationSessionSchema = new Schema(
     end_time: { type: Date },
     duration_minutes: { type: Number, min: 1 },
     rate_per_minute: { type: Number, required: true, min: 1 },
+    total_buffer_time: { type: Number, default: 0 },
     total_amount: { type: Number, min: 0 },
     astrologer_share_amount: {
       type: Number,
