@@ -57,7 +57,10 @@ function handleChatRequestEvents(socketManager, socket) {
         });
       }
       const busySessionId = await CacheService.isAstrologerBusy(astrologerId);
+      console.log(`Checked busy status for astrologer ${astrologerId}: ${busySessionId ? "Busy" : "Available"}`,
+      );
       if (busySessionId) {
+        console.log(`Astrologer ${astrologerId} is currently busy with session ${busySessionId}`);
         return callback?.({ success: false, message: "Astrologer is Busy" });
       }
       if (busySessionId) {
