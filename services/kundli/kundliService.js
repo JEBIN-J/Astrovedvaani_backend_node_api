@@ -98,8 +98,6 @@ const callApi = async (apiUrl) => {
     // timeout: 15000,
   });
 
-  console.log(`API Response from ${apiUrl}:`, response);
-
   return response;
 };
 const getKundliData = async (userId, queryParams = {}, isRelative = false) => {
@@ -680,8 +678,6 @@ const getFullKundliData = async (
     logger.info(`FullKundli API URL: ${apiUrl}`);
 
     const response = await callApi(apiUrl);
-
-    console.log("Full Kundli API response:", response);
 
     fullKundliData = response.data;
   } catch (err) {
