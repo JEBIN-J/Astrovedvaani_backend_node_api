@@ -17,7 +17,7 @@ const asyncHandler = (fn) => (req, res, next) => {
     let statusCode = 500;
     let message = error.message || "Internal server error";
 
-    console.error("Error in asyncHandler:", error);
+    
 
     // -------------------------------
     // ✅ 1. Handle Axios Errors FIRST
