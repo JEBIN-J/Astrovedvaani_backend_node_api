@@ -98,6 +98,8 @@ const callApi = async (apiUrl) => {
     // timeout: 15000,
   });
 
+  console.log(`API Response from ${apiUrl}:`, response);
+
   return response;
 };
 const getKundliData = async (userId, queryParams = {}, isRelative = false) => {

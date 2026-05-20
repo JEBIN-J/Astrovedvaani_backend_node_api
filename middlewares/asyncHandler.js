@@ -16,7 +16,22 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch((error) => {
     let statusCode = 500;
     let message = error.message || "Internal server error";
-    if (error instanceof BadRequestError) statusCode = 400;
+
+    // -------------------------------
+    // ✅ 1. Handle Axios Errors FIRST
+    // -------------------------------
+    if (error.response) {
+      statusCode = error.response.status || 500;
+      message =
+        error.response.data?.message ||
+        error.response.data?.error ||
+        message;
+    }
+
+    // -------------------------------
+    // ✅ 2. Handle Custom Errors
+    // -------------------------------
+    else if (error instanceof BadRequestError) statusCode = 400;
     else if (error instanceof ValidationError) statusCode = 422;
     else if (error instanceof ConflictError) statusCode = 409;
     else if (error instanceof NotFoundError) statusCode = 404;
@@ -26,18 +41,33 @@ const asyncHandler = (fn) => (req, res, next) => {
     else if (error instanceof InvalidTokenError) statusCode = 401;
     else if (error instanceof MissingTokenError) statusCode = 401;
     else if (error instanceof InsufficientBalanceError) statusCode = 402;
+
+    // -------------------------------
+    // ✅ 3. Mongo Duplicate Error
+    // -------------------------------
     else if (error.code === 11000) {
       statusCode = 400;
       const field = Object.keys(error.keyValue)[0];
       message = `${field} already exists`;
     }
+
+    // -------------------------------
+    // ✅ 4. No Response Case (timeout etc.)
+    // -------------------------------
+    else if (error.request) {
+      statusCode = 503;
+      message = "No response from external service";
+    }
+
     const response = {
       success: false,
       message,
     };
+
     if (process.env.NODE_ENV !== "production") {
       response.stack = error.stack;
     }
+
     return res.status(statusCode).json(response);
   });
 };
