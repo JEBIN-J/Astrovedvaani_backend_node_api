@@ -679,6 +679,8 @@ const getFullKundliData = async (
 
     const response = await callApi(apiUrl);
 
+    console.log("Full Kundli API response:", response);
+
     fullKundliData = response.data;
   } catch (err) {
     logger.error(`Failed to fetch FullKundli API for userId=${userId}`, err);

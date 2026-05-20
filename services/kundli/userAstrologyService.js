@@ -258,7 +258,8 @@ const getCitySuggestion = async (input) => {
     );
 
     // Filter out failed details fetches
-    return results.filter(r => r.lat && r.lon);
+    const detailedSuggestions = results.filter(r => r.lat && r.lon);
+    return { success: true, data: detailedSuggestions };
   } catch (error) {
     console.error("Error fetching location suggestions:", error.message);
     if (error.response) {
