@@ -65,6 +65,22 @@ class RedisClient {
     return this.client.ping();
   }
 
+  sMembers(key) {
+    return this.client.sMembers(key);
+  }
+
+  sAdd(key, members) {
+    return this.client.sAdd(key, members);
+  }
+
+  sRem(key, members) {
+    return this.client.sRem(key, members);
+  }
+
+  expire(key, ttl) {
+    return this.client.expire(key, ttl);
+  }
+
   async flushDb() {
     await this.client.flushDb();
   }
