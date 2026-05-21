@@ -11,13 +11,7 @@ const RESERVED_KEYS = [
   "ttl",
   "priority",
 ];
-async function sendPushNotification(
-  userId,
-  title,
-  body,
-  data = {},
-  notificationPayload = {},
-) {
+async function sendPushNotification(userId, title, body, data = {}, channelId = "messages", sound = "ding.mp3") {
   logger.info(`[NOTIF] Sending push notification to userId: ${userId}`);
   const user = await User.findById(userId);
   if (!user) {
@@ -39,8 +33,13 @@ async function sendPushNotification(
     token,
     notification: { title, body },
     data: sanitizedData,
-    android: notificationPayload,
-    // ios: notificationPayload,
+    android: {
+      priority: "high",
+      notification: {
+        channelId,
+        sound,
+      },
+    },
   };
 
   try {
