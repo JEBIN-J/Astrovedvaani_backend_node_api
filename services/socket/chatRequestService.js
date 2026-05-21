@@ -140,6 +140,8 @@ function handleChatRequestEvents(socketManager, socket) {
             "New Chat Request",
             payload.message,
             payload,
+            "chat_messages",
+            "hindi.mp3"
           );
           logger.info(
             `[SOCKET] Firebase push ${pushSent ? "succeeded" : "failed"} for astrologer ${astrologerId}`,

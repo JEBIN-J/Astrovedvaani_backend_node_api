@@ -109,7 +109,9 @@ function registerAgoraCallHandlers(socketManager, socket) {
               astrologerId,
               `Incoming ${serviceName}`,
               payload.message,
-              payload
+              payload,
+              "audio_calls",
+              "hindi.mp3"
             );
             logger.info(`[SOCKET] Firebase push ${pushSent ? 'succeeded' : 'failed'} for astrologer ${astrologerId}`);
           } catch (pushErr) {
