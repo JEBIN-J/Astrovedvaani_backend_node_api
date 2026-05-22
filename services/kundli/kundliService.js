@@ -26,6 +26,42 @@ const convertTo24Hour = (timeStr) => {
 const normalizeParams = (queryParams = {}, profile = {}) => {
   const pad = (v) => String(v).padStart(2, "0");
 
+  // Convert 12-hour time to 24-hour time if needed
+  const normalizeTime = (time = "00:00") => {
+    if (!time) return "00:00";
+
+    const trimmed = time.trim();
+
+    // Match formats like:
+    // 03:36 PM
+    // 3:36 PM
+    // 03:36PM
+    const match = trimmed.match(
+      /^(\d{1,2}):(\d{2})\s?(AM|PM)$/i,
+    );
+
+    // Already in 24-hour format
+    if (!match) {
+      const [h = "00", m = "00"] = trimmed.split(":");
+      return `${pad(h)}:${pad(m)}`;
+    }
+
+    let [, hours, minutes, meridian] = match;
+
+    hours = parseInt(hours, 10);
+    meridian = meridian.toUpperCase();
+
+    if (meridian === "PM" && hours !== 12) {
+      hours += 12;
+    }
+
+    if (meridian === "AM" && hours === 12) {
+      hours = 0;
+    }
+
+    return `${pad(hours)}:${minutes}`;
+  };
+
   let dob;
   let tob;
 
@@ -34,7 +70,7 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
   // ===============================
   if (queryParams.dob) {
     dob = queryParams.dob.replace(/\//g, "-");
-    tob = queryParams.tob || "00:00";
+    tob = normalizeTime(queryParams.tob || "00:00");
   }
 
   // ===============================
@@ -42,7 +78,12 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
   // ===============================
   else if (queryParams.day) {
     dob = `${pad(queryParams.day)}-${pad(queryParams.month)}-${queryParams.year}`;
-    tob = `${pad(queryParams.hour)}:${pad(queryParams.min)}`;
+
+    tob = normalizeTime(
+      `${pad(queryParams.hour)}:${pad(queryParams.min)} ${
+        queryParams.ampm || ""
+      }`.trim(),
+    );
   }
 
   // ===============================
@@ -55,8 +96,7 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
       birthDate.getMonth() + 1,
     )}-${birthDate.getFullYear()}`;
 
-    const [h, m] = profile.birthTime.split(":");
-    tob = `${pad(h)}:${pad(m)}`;
+    tob = normalizeTime(profile.birthTime);
   }
 
   return {
@@ -66,8 +106,11 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
       queryParams.tz ||
       profile?.timezone ||
       -new Date(profile?.birthDate || Date.now()).getTimezoneOffset() / 60,
+
     lang: queryParams.lang || profile?.preferredLanguage || "en",
+
     name: queryParams.name || profile?.name || "User",
+
     birthPlace:
       queryParams.birthPlace ||
       queryParams.location ||
@@ -83,7 +126,7 @@ const getProfile = async (userId, isRelative) => {
   console.log("isRelative", isRelative);
   console.log("userID", userId);
   if (isRelative) {
-    return await UserAstrology.findById(userId);
+    return await UserAstrology.findOne({userId});
   }
 
   return await UserAstrology.findOne({
