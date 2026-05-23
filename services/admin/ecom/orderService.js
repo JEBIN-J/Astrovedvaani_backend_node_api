@@ -5,7 +5,7 @@ const Address = require("../../../models/Address");
 const { getFeedBackBySourceId } = require("../feedBackService");
 const { updateWalletAndLedger } = require("../../walletService");
 const Enums = require("../../../utils/constants");
-const invoiceService = require("../../user/astromall/invoiceService");
+const invoiceService = require("../../user/astromall/InvoiceService");
 
 const Invoice = require("../../../models/Invoice");
 const {
