@@ -7,6 +7,8 @@ const { getAstrologerDetails } = require("../../session/astrologerService");
 const { getFeedBackBySourceId } = require("../feedBackService");
 const { NotFoundError, BadRequestError } = require("../../../errors");
 const ChatMessage = require("../../../models/Chat");
+const Astrologer = require("../../../models/Astrologer");
+const Wallet = require("../../../models/Wallet");
 function sanitizeUser(user) {
   if (!user) return null;
 
@@ -26,6 +28,25 @@ function sanitizeUser(user) {
   return safeUser;
 }
 
+const buildDateFilter = (start_date, end_date) => {
+  if (!start_date && !end_date) return null;
+
+  const dateFilter = {};
+
+  if (start_date) {
+    const start = new Date(start_date);
+    start.setHours(0, 0, 0, 0); // start of day
+    dateFilter.$gte = start;
+  }
+
+  if (end_date) {
+    const end = new Date(end_date);
+    end.setHours(23, 59, 59, 999); // end of day
+    dateFilter.$lte = end;
+  }
+
+  return dateFilter;
+};
 exports.getConsultationSessions = async (filters) => {
   const {
     user_id,
@@ -37,14 +58,37 @@ exports.getConsultationSessions = async (filters) => {
     end_date,
     page = 1,
     limit = 10,
+    search,
   } = filters;
 
   const query = {};
 
+  // =========================================
+  // SEARCH FILTER
+  // =========================================
+  if (search) {
+    const users = await User.find({
+      mobileNumber: {
+        $regex: search,
+        $options: "i",
+      },
+    }).select("_id");
+
+    const userIds = users.map((u) => u._id);
+
+    query.user_id = { $in: userIds };
+  }
+
+  // =========================================
+  // USER FILTER
+  // =========================================
   if (user_id && mongoose.Types.ObjectId.isValid(user_id)) {
     query.user_id = user_id;
   }
 
+  // =========================================
+  // ASTROLOGER USER FILTER
+  // =========================================
   if (
     astrologer_user_id &&
     mongoose.Types.ObjectId.isValid(astrologer_user_id)
@@ -55,20 +99,27 @@ exports.getConsultationSessions = async (filters) => {
   if (astrologer_id && mongoose.Types.ObjectId.isValid(astrologer_id)) {
     query.astrologer_id = astrologer_id;
   }
+
   if (status !== undefined) {
     query.status = Number(status);
   } else {
-    query.status = { $ne: Enums.SERVICE.STATUS.PENDING };
+    query.status = {
+      $ne: Enums.SERVICE.STATUS.PENDING,
+    };
   }
+
   if (payment_status !== undefined) {
     query.payment_status = Number(payment_status);
   }
-  if (start_date || end_date) {
-    query.createdAt = {};
-    if (start_date) query.createdAt.$gte = new Date(start_date);
-    if (end_date) query.createdAt.$lte = new Date(end_date);
+
+  const dateFilter = buildDateFilter(start_date, end_date);
+
+  if (dateFilter) {
+    query.createdAt = dateFilter;
   }
+
   const skip = (parseInt(page) - 1) * parseInt(limit);
+
   const [rawSessions, totalDocs] = await Promise.all([
     ConsultationSession.find(query)
       .populate({ path: "user_id" })
@@ -77,79 +128,192 @@ exports.getConsultationSessions = async (filters) => {
       .skip(skip)
       .limit(parseInt(limit))
       .lean(),
+
     ConsultationSession.countDocuments(query),
   ]);
+
+  const earningQuery = {
+    transaction_type: Enums.TRANSACTION.TYPE.SESSION,
+
+    direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+  };
+
+  if (dateFilter) {
+    earningQuery.timestamp = dateFilter;
+  }
+
+  let earningUserId = null;
+
+  if (
+    astrologer_user_id &&
+    mongoose.Types.ObjectId.isValid(astrologer_user_id)
+  ) {
+    earningUserId = astrologer_user_id;
+  } else if (astrologer_id && mongoose.Types.ObjectId.isValid(astrologer_id)) {
+    const astrologerData = await Astrologer.findById(astrologer_id).lean();
+
+    if (astrologerData?.user_id) {
+      earningUserId = astrologerData.user_id;
+    }
+  }
+
+  if (earningUserId) {
+    const astrologerWallet = await Wallet.findOne({
+      user_id: earningUserId,
+    }).lean();
+
+    if (astrologerWallet) {
+      earningQuery.wallet_id = astrologerWallet._id;
+    }
+  }
+
+  // =========================================
+  // TOTAL EARNING
+  // =========================================
+  const earningResult = await WalletLedger.aggregate([
+    {
+      $match: earningQuery,
+    },
+
+    {
+      $group: {
+        _id: null,
+
+        total_earning: {
+          $sum: "$final_amount",
+        },
+      },
+    },
+  ]);
+
+  const overall_earning = earningResult[0]?.total_earning || 0;
+
+  // =========================================
+  // SESSION TRANSFORM
+  // =========================================
   const sessions = await Promise.all(
     rawSessions.map(async (session) => {
       const isFree = session.is_free;
+
       let expected_user_debit = null;
       let expected_astrologer_credit = null;
       let expected_admin_earning = null;
+
       let actual_user_debit = null;
       let actual_astrologer_credit = null;
       let actual_admin_earning = null;
+
+      // =========================================
+      // PAID SESSION
+      // =========================================
       if (!isFree && session.total_amount && session.astrologer_user_id) {
         const { serviceRate } = await getAstrologerDetails(
           session.astrologer_user_id,
         );
+
         const commissionPercent = serviceRate?.commission_pct ?? 0;
+
         expected_astrologer_credit = Math.round(
           (commissionPercent / 100) * session.total_amount,
         );
+
         expected_admin_earning =
           session.total_amount - expected_astrologer_credit;
+
         expected_user_debit = session.total_amount;
+
+        // =====================================
+        // LEDGER ENTRIES
+        // =====================================
         const ledgerEntries = await WalletLedger.find({
           related_entity: session._id,
+
           transaction_type: Enums.TRANSACTION.TYPE.SESSION,
         }).lean();
+
         for (const entry of ledgerEntries) {
+          // USER DEBIT
           if (entry.direction === Enums.TRANSACTION.DIRECTION.DEBIT) {
-            actual_user_debit = (actual_user_debit || 0) + entry.amount;
-          } else if (entry.direction === Enums.TRANSACTION.DIRECTION.CREDIT) {
-            if (entry.remarks?.includes("Astrologer share")) {
+            actual_user_debit = (actual_user_debit || 0) + entry.final_amount;
+          }
+
+          // CREDIT
+          else if (entry.direction === Enums.TRANSACTION.DIRECTION.CREDIT) {
+            // ASTROLOGER
+            if (entry.remarks?.includes("Astrologer")) {
               actual_astrologer_credit =
-                (actual_astrologer_credit || 0) + entry.amount;
-            } else if (entry.remarks?.includes("Admin share")) {
-              actual_admin_earning = (actual_admin_earning || 0) + entry.amount;
+                (actual_astrologer_credit || 0) + entry.final_amount;
+            }
+
+            // ADMIN
+            else if (entry.remarks?.includes("Admin")) {
+              actual_admin_earning =
+                (actual_admin_earning || 0) + entry.final_amount;
             }
           }
         }
       }
+
+      // =========================================
+      // FEEDBACK
+      // =========================================
       const feedback = await getFeedBackBySourceId(session._id);
+
       return {
         ...session,
+
         user: sanitizeUser(session.user_id),
+
         astrologer: sanitizeUser(session.astrologer_id),
+
         expected_user_debit,
         expected_astrologer_credit,
         expected_admin_earning,
+
         actual_user_debit,
         actual_astrologer_credit,
         actual_admin_earning,
+
         rating: feedback?.rating ?? null,
+
         review: feedback?.review ?? null,
       };
     }),
   );
 
+  // =========================================
+  // REMOVE EXTRA IDS
+  // =========================================
   sessions.forEach((session) => {
     delete session.user_id;
     delete session.astrologer_id;
     delete session.astrologer_user_id;
   });
+
+  // =========================================
+  // PAGINATION
+  // =========================================
   const totalPages = Math.ceil(totalDocs / limit);
+
   const pagination = buildPaginationResponse({
     totalDocs,
     totalPages,
     page: parseInt(page),
     limit: parseInt(limit),
   });
+
+  // =========================================
+  // FINAL RESPONSE
+  // =========================================
   return {
     sessions,
+
+    overall_earning,
+
     pagination,
   };
 };
+
 exports.fetchMessages = async ({
   session_id,
   message_type,

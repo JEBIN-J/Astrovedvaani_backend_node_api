@@ -233,6 +233,19 @@ exports.getOrderHistory = async (userId, filters) => {
       }),
     };
   }
+  const orderIds = ordersRaw.map((o) => o._id);
+
+  const invoices = await Invoice.find({
+    order_id: { $in: orderIds },
+  })
+    .select("order_id invoiceUrl invoice_number")
+    .lean();
+
+  const invoiceMap = invoices.reduce((acc, inv) => {
+    acc[inv.order_id.toString()] = inv;
+
+    return acc;
+  }, {});
   const productReferenceIds = ordersRaw
     .filter((o) => o.order_type === Enums.ORDER.TYPE.PRODUCT)
     .map((o) => o.reference_id);
@@ -307,6 +320,7 @@ exports.getOrderHistory = async (userId, filters) => {
         ...order,
         isUpdateAllowed,
         ...(itemDetails && { item: itemDetails }),
+        invoice: invoiceMap[order._id.toString()] || null,
       };
     })
     .filter((o) => {

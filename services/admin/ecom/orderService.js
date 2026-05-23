@@ -5,7 +5,24 @@ const Address = require("../../../models/Address");
 const { getFeedBackBySourceId } = require("../feedBackService");
 const { updateWalletAndLedger } = require("../../walletService");
 const Enums = require("../../../utils/constants");
-
+const invoiceService = require("../../user/astromall/invoiceService");
+const inVoice = require("../../user/astromall/invoiceService");
+const Invoice = require("../../../models/Invoice");
+const {
+  sendOrderAcceptedMail,
+} = require("../../communication/sendOrderPlaceMail");
+const {
+  sendOrderProcessingMail,
+} = require("../../communication/sendOrderProcessingMail");
+const {
+  sendOrderShippedMail,
+} = require("../../communication/sendOrderShippedMail");
+const {
+  sendOrderCancelledMail,
+} = require("../../communication/sendOrderCancelledMail");
+const {
+  sendOrderDeliveredMail,
+} = require("../../communication/sendOrderDeliveredMail");
 // exports.getAllOrders = async ({
 //   page = 1,
 //   limit = 10,
@@ -158,7 +175,18 @@ exports.getAllOrders = async ({
 
     Order.countDocuments(match),
   ]);
+  const orderIds = orders.map((o) => o._id);
 
+  const invoices = await Invoice.find({
+    order_id: { $in: orderIds },
+  })
+    .select("order_id invoiceUrl invoice_number")
+    .lean();
+
+  const invoiceMap = invoices.reduce((acc, inv) => {
+    acc[inv.order_id.toString()] = inv;
+    return acc;
+  }, {});
   // filter orders if vendor
   const filteredOrders =
     role === Enums.USER.ROLE.VENDOR
@@ -174,6 +202,7 @@ exports.getAllOrders = async ({
       const feedback = await getFeedBackBySourceId(order._id);
       return {
         ...order,
+        invoice: invoiceMap[order._id.toString()] || null,
         rating: feedback?.rating ?? null,
         review: feedback?.review ?? null,
       };
@@ -184,12 +213,12 @@ exports.getAllOrders = async ({
     orders: enrichedOrders,
     totalDocs:
       role === Enums.USER.ROLE.VENDOR ? filteredOrders.length : totalDocs,
+
     totalPages: Math.ceil(totalDocs / limit),
     page,
     limit,
   };
 };
-
 exports.updateOrder = async (id, updates) => {
   const allowedFields = [
     "payment_status",
@@ -198,27 +227,63 @@ exports.updateOrder = async (id, updates) => {
     "order_type",
     "remarks",
   ];
-
   const filteredUpdates = {};
   for (const key of allowedFields) {
     if (updates[key] !== undefined) {
       filteredUpdates[key] = updates[key];
     }
   }
-
   const order = await Order.findById(id);
   if (!order) throw new Error("Order not found");
-  if (updates.tracking_status === 1402) {
+  const validTrackingTransitions = {
+    [Enums.ORDER.STATUS.PENDING]: [
+      Enums.ORDER.STATUS.PLACED,
+      Enums.ORDER.STATUS.CANCELLED,
+    ],
+    [Enums.ORDER.STATUS.PLACED]: [
+      Enums.ORDER.STATUS.PROCESSING,
+      Enums.ORDER.STATUS.CANCELLED,
+    ],
+    [Enums.ORDER.STATUS.PROCESSING]: [
+      Enums.ORDER.STATUS.SHIPPED,
+      Enums.ORDER.STATUS.CANCELLED,
+    ],
+    [Enums.ORDER.STATUS.SHIPPED]: [Enums.ORDER.STATUS.DELIVERED],
+    [Enums.ORDER.STATUS.DELIVERED]: [],
+    [Enums.ORDER.STATUS.CANCELLED]: [],
+  };
+  if (
+    filteredUpdates.tracking_status !== undefined &&
+    !validTrackingTransitions[order.tracking_status]?.includes(
+      filteredUpdates.tracking_status,
+    )
+  ) {
+    throw new Error("Invalid tracking status transition");
+  }
+  if (filteredUpdates.tracking_status === Enums.ORDER.STATUS.SHIPPED) {
     const DAYS_TO_DELIVER = 5;
     filteredUpdates.expected_delivery_date = new Date(
       Date.now() + DAYS_TO_DELIVER * 24 * 60 * 60 * 1000,
     );
   }
+  if (filteredUpdates.tracking_status === Enums.ORDER.STATUS.DELIVERED) {
+    filteredUpdates.delivered_at = new Date();
+  }
   if (
-    updates.payment_status === Enums.PAYMENT.STATUS.REFUNDED &&
-    order.payment_status === Enums.PAYMENT.STATUS.PAID
+    filteredUpdates.tracking_status !== undefined &&
+    filteredUpdates.tracking_status !== Enums.ORDER.STATUS.SHIPPED
   ) {
-    if (order.paid_amount > 0) {
+    filteredUpdates.expected_delivery_date = null;
+  }
+  const shouldRefund =
+    filteredUpdates.payment_status === Enums.PAYMENT.STATUS.REFUNDED ||
+    filteredUpdates.tracking_status === Enums.ORDER.STATUS.CANCELLED;
+  const isRefundAllowed =
+    order.payment_status === Enums.PAYMENT.STATUS.PAID &&
+    order.paid_amount > 0 &&
+    order.payment_method !== Enums.PAYMENT.METHOD.COD;
+  if (shouldRefund && isRefundAllowed) {
+    if (order.payment_status !== Enums.PAYMENT.STATUS.REFUNDED) {
       await updateWalletAndLedger({
         userId: order.user_id,
         amount: order.paid_amount,
@@ -230,9 +295,9 @@ exports.updateOrder = async (id, updates) => {
             ? Enums.ENTITY.TYPE.POOJA
             : Enums.ENTITY.TYPE.PRODUCT,
       });
+      filteredUpdates.payment_status = Enums.PAYMENT.STATUS.REFUNDED;
     }
   }
-
   const updatedOrder = await Order.findByIdAndUpdate(
     id,
     { $set: filteredUpdates },
@@ -245,6 +310,139 @@ exports.updateOrder = async (id, updates) => {
       "name phone line1 line2 city state pincode country",
     )
     .lean();
+  // =========================
+  // MAIL INTEGRATION
+  // =========================
+
+  const user = await User.findById(order.user_id).select("name email").lean();
+
+  if (user?.email && filteredUpdates.tracking_status) {
+    // =========================
+    // PLACED
+    // =========================
+
+    if (filteredUpdates.tracking_status === Enums.ORDER.STATUS.PLACED) {
+      setImmediate(async () => {
+        try {
+          await sendOrderAcceptedMail({
+            email: user.email,
+            customerName: user.name,
+            orderId: order._id,
+            orderDate: new Date(order.createdAt).toLocaleDateString(),
+            orderAmount: order.total_payable,
+          });
+        } catch (error) {
+          console.error("ORDER ACCEPTED MAIL ERROR =>", error);
+        }
+      });
+    }
+
+    // =========================
+    // PROCESSING
+    // =========================
+
+    if (filteredUpdates.tracking_status === Enums.ORDER.STATUS.PROCESSING) {
+      setImmediate(async () => {
+        try {
+          await sendOrderProcessingMail({
+            email: user.email,
+            customerName: user.name,
+            orderId: order._id,
+            processingDate: new Date().toLocaleDateString(),
+          });
+        } catch (error) {
+          console.error("ORDER PROCESSING MAIL ERROR =>", error);
+        }
+      });
+    }
+
+    // =========================
+    // SHIPPED
+    // =========================
+
+    if (filteredUpdates.tracking_status === Enums.ORDER.STATUS.SHIPPED) {
+      setImmediate(async () => {
+        try {
+          await sendOrderShippedMail({
+            email: user.email,
+            customerName: user.name,
+            orderId: order._id,
+            deliveryDate: new Date(
+              filteredUpdates.expected_delivery_date,
+            ).toLocaleDateString(),
+          });
+        } catch (error) {
+          console.error("ORDER SHIPPED MAIL ERROR =>", error);
+        }
+      });
+    }
+
+    // =========================
+    // DELIVERED
+    // =========================
+
+    if (filteredUpdates.tracking_status === Enums.ORDER.STATUS.DELIVERED) {
+      setImmediate(async () => {
+        try {
+          await sendOrderDeliveredMail({
+            email: user.email,
+            customerName: user.name,
+            orderId: order._id,
+            deliveryDate: new Date().toLocaleDateString(),
+          });
+        } catch (error) {
+          console.error("ORDER DELIVERED MAIL ERROR =>", error);
+        }
+      });
+      filteredUpdates.delivered_at = new Date();
+
+      setImmediate(async () => {
+        try {
+          console.log(
+            "STARTING BACKGROUND INVOICE GENERATION =>",
+            order._id.toString(),
+          );
+
+          const freshOrder = await Order.findById(order._id);
+
+          const existingInvoice = await Invoice.findOne({
+            order_id: order._id,
+          });
+
+          if (!existingInvoice) {
+            await invoiceService.generateInvoice(freshOrder, null);
+
+            console.log(
+              "INVOICE GENERATED SUCCESSFULLY =>",
+              order._id.toString(),
+            );
+          }
+        } catch (error) {
+          console.error("BACKGROUND INVOICE GENERATION FAILED =>", error);
+        }
+      });
+    }
+
+    // =========================
+    // CANCELLED
+    // =========================
+
+    if (filteredUpdates.tracking_status === Enums.ORDER.STATUS.CANCELLED) {
+      setImmediate(async () => {
+        try {
+          await sendOrderCancelledMail({
+            email: user.email,
+            customerName: user.name,
+            orderId: order._id,
+            cancelledDate: new Date().toLocaleDateString(),
+            refundAmount: order.paid_amount || 0,
+          });
+        } catch (error) {
+          console.error("ORDER CANCELLED MAIL ERROR =>", error);
+        }
+      });
+    }
+  }
 
   return updatedOrder;
 };

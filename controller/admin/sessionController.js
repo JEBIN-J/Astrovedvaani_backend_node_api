@@ -56,6 +56,7 @@ exports.getConsultationSessions = async (req, res, next) => {
     );
     return res.status(200).json({
       success: true,
+      overall_earning: result.overall_earning || 0,
       sessions: transformedSessions,
       pagination: result.pagination,
     });

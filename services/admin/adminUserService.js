@@ -22,11 +22,63 @@ const {
   ValidationError,
   ApiError,
 } = require("../../errors");
-
+const Wallet = require("../../models/Wallet");
+const WalletLedger = require("../../models/Ledger");
 const { CACHE_PREFIXES, ASTROLOGER_TTL, DEFAULT_TTL, SERVICE_RATES_TTL } =
   CacheService;
 const ASTROLOGER_CACHE_PREFIX = "astro:list";
 
+async function getAstrologerMonthlyEarnings(userId) {
+  try {
+    const wallet = await Wallet.findOne({
+      user_id: userId,
+    }).lean();
+
+    if (!wallet) {
+      return 0;
+    }
+
+    const now = new Date();
+
+    // current month start
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // next month start
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const currentMonthAgg = await WalletLedger.aggregate([
+      {
+        $match: {
+          wallet_id: wallet._id,
+
+          direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+
+          payment_status: Enums.PAYMENT.STATUS.PAID,
+
+          createdAt: {
+            $gte: currentMonthStart,
+            $lt: nextMonthStart,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    return Number(currentMonthAgg[0]?.total || 0);
+  } catch (error) {
+    console.error("getAstrologerMonthlyEarnings Error:", error);
+
+    return 0;
+  }
+}
 const createUserByAdmin = async ({
   name,
   email,
@@ -471,10 +523,16 @@ async function fetchUsersWithDetails(
       const followingCount = await FollowRequest.countDocuments({
         user_id: u._id,
       });
+      let currentMonthEarning = 0;
+
+      if (u.role === Enums.USER.ROLE.ASTROLOGER) {
+        currentMonthEarning = await getAstrologerMonthlyEarnings(u._id);
+      }
       return {
         ...u,
         followersCount,
         followingCount,
+        currentMonthEarning,
       };
     }),
   );

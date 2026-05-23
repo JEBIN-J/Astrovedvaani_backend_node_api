@@ -226,12 +226,12 @@ exports.initiateOrderPayment = async (userId, orderId, method, provider) => {
         throw err;
       }
 
-      try {
-        await InvoiceService.generateInvoice(order, userLedger?._id);
-      } catch (err) {
-        logger.error("Error in invoice generation", err);
-        throw err;
-      }
+      // try {
+      //   await InvoiceService.generateInvoice(order, userLedger?._id);
+      // } catch (err) {
+      //   logger.error("Error in invoice generation", err);
+      //   throw err;
+      // }
 
       if (order.order_type === Enums.ORDER.TYPE.POOJA) {
         try {

@@ -84,7 +84,7 @@ const generateEmailTemplate = ({ title, message, footer, extraContent }) => {
   <body>
     <div class="container">
       <div class="header">
-        <img src="https://api.astrovedvanni.in/uploads/logo1.png" alt="astrovedvanni Logo"/>
+        <img src="https://api.astrovedvaani.com/uploads/ved.png" alt="astrovedvanni Logo"/>
         <h1>astrovedvanni</h1>
       </div>
       <div class="content">
