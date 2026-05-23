@@ -18,7 +18,7 @@ const moment = require("moment");
 const { notifyWalletAdjustment } = require("../../schedule/notificationWorker");
 const { BadRequestError, NotFoundError } = require("../../errors");
 const { emitWalletUpdate } = require("../socket/walletNotification");
-
+const mongoose = require("mongoose");
 // ✅ Build UTC date range safely
 const buildUTCDateRange = (startDate, endDate) => {
   if (!startDate && !endDate) return null;
@@ -555,7 +555,10 @@ exports.getWithdrawalRequests = async ({
     const match = {};
 
     if (status !== undefined) match.status = Number(status);
-    if (astrologerId) match.user = mongoose.Types.ObjectId(astrologerId);
+
+    if (astrologerId && mongoose.Types.ObjectId.isValid(astrologerId)) {
+      match.user = new mongoose.Types.ObjectId(astrologerId);
+    }
 
     if (startDate || endDate) {
       match.requestedAt = {};
@@ -575,6 +578,7 @@ exports.getWithdrawalRequests = async ({
 
     const pipeline = [
       { $match: match },
+
       // Join User collection
       {
         $lookup: {
@@ -585,6 +589,7 @@ exports.getWithdrawalRequests = async ({
         },
       },
       { $unwind: "$user" },
+
       // Join Astrologer collection
       {
         $lookup: {
@@ -595,13 +600,40 @@ exports.getWithdrawalRequests = async ({
         },
       },
       { $unwind: { path: "$astrologer", preserveNullAndEmptyArrays: true } },
+
+      // Wallet lookup (ONLY BALANCE)
+      {
+        $lookup: {
+          from: "wallets",
+          let: { walletId: "$wallet" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$_id", "$$walletId"] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                balance: 1,
+              },
+            },
+          ],
+          as: "wallet",
+        },
+      },
+      {
+        $unwind: {
+          path: "$wallet",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
     ];
 
-    // Create search match stage
-    let searchMatch = null;
+    // Search filter
     if (search) {
       const regex = new RegExp(search, "i");
-      searchMatch = {
+      pipeline.push({
         $match: {
           $or: [
             { "user.name": regex },
@@ -610,11 +642,10 @@ exports.getWithdrawalRequests = async ({
             { "astrologer.display_name": regex },
           ],
         },
-      };
-      pipeline.push(searchMatch);
+      });
     }
 
-    // Count total docs for pagination - include search filter
+    // Count total docs
     const totalDocsPipeline = [...pipeline];
     totalDocsPipeline.push({ $count: "count" });
 
@@ -622,7 +653,7 @@ exports.getWithdrawalRequests = async ({
       await WithdrawalRequest.aggregate(totalDocsPipeline);
     const totalDocs = totalDocsResult[0]?.count || 0;
 
-    // Add sorting, skip, limit to main pipeline
+    // Pagination
     pipeline.push({ $sort: { requestedAt: -1 } });
     pipeline.push({ $skip: skip });
     pipeline.push({ $limit: limit });
