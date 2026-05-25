@@ -174,6 +174,11 @@ const getFullKundliData = asyncHandler(async (req, res) => {
     isRelative,
   });
 
+
+   if (queryParams?.isAstroSide == "true") {
+    isRelative = false;
+  }
+
   const kundliData = await kundliService.getFullKundliData(
     userId,
     queryParams,
