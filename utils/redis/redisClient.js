@@ -88,6 +88,10 @@ class RedisClient {
     await this.client.flushAll();
   }
 
+  async incr(key) {
+    return this.client.incr(key);
+  }
+
   getClient() {
     return this.client;
   }
