@@ -17,7 +17,7 @@ const getMyKundlis = async (userId, isKundli, page = 1, limit = 10) => {
   const selfProfile = await UserAstrology.findOne({
     userId,
     relationshipToOwner: "self",
-  }).select("_id name gender rasi birthDate birthTime birthPlace zodiacSign");
+  }).select("_id name gender rasi birthDate birthTime birthPlace zodiacSign userId");
   const filter = { userId };
   if (typeof isKundli === "boolean") {
     filter.isKundli = isKundli;
@@ -30,7 +30,7 @@ const getMyKundlis = async (userId, isKundli, page = 1, limit = 10) => {
   }
   const totalDocs = await UserAstrology.countDocuments(filter);
   const relatives = await UserAstrology.find(filter)
-    .select("_id name gender rasi birthDate birthTime birthPlace zodiacSign")
+    .select("_id name gender rasi birthDate birthTime birthPlace zodiacSign userId")
     .sort({ createdAt: -1 })
     .skip((pageNum - 1) * limitNum)
     .limit(limitNum);
