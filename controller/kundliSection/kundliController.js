@@ -165,6 +165,7 @@ const getChoghadiya = asyncHandler(async (req, res) => {
 
 const getFullKundliData = asyncHandler(async (req, res) => {
   console.log("query", req.query);
+  const role = req.user?.role;
   let { userId, queryParams, isRelative } = extractCommonParams(req);
 
   if (queryParams?.isAstroSide == "true") {
@@ -181,6 +182,7 @@ const getFullKundliData = asyncHandler(async (req, res) => {
     userId,
     queryParams,
     isRelative,
+    role,
   );
 
   res.status(200).json(kundliData);

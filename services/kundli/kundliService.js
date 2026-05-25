@@ -10,6 +10,7 @@ const { getDosha, getTransitPlanets } = require("./transitDoshaService");
 const API = require("./api").default;
 const { fetchUserDetailsById } = require("../astrologer/userService");
 const { getSaasHeaders } = require("../../utils/apiHeader");
+const Enums = require("../../utils/constants");
 const formatWithLeadingZero = (num) => String(num).padStart(2, "0");
 
 const convertTo24Hour = (timeStr) => {
@@ -122,11 +123,18 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
 // 🔥 COMMON PROFILE FETCHER
 // =====================================================
 
-const getProfile = async (userId, isRelative) => {
+const getProfile = async (userId, isRelative, role) => {
   console.log("isRelative", isRelative);
   console.log("userID", userId);
   if (isRelative) {
+    if (role === Enums.USER.ROLE.ASTROLOGER) {
+      console.log("Fetching profile by ID for astrologer",role);
     return await UserAstrology.findOne({userId});
+    }
+    else if (role === Enums.USER.ROLE.USER) {
+      console.log("Fetching profile by ID for relative",role);
+      return await UserAstrology.findById(userId);
+    }
   }
 
   return await UserAstrology.findOne({
@@ -672,12 +680,13 @@ const getFullKundliData = async (
   userId,
   queryParams = {},
   isRelative = false,
+  role
 ) => {
   logger.info(
     `getFullKundliData called for userId=${userId}, isRelative=${isRelative}`,
   );
 
-  const profile = await getProfile(userId, isRelative);
+  const profile = await getProfile(userId, isRelative, role);
 
   console.log("User profile for Full Kundli Data:", profile);
 
