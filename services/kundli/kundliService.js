@@ -126,6 +126,7 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
 const getProfile = async (userId, isRelative, role) => {
   console.log("isRelative", isRelative);
   console.log("userID", userId);
+  console.log("role", role);
   if (isRelative) {
     if (role === Enums.USER.ROLE.ASTROLOGER) {
       console.log("Fetching profile by ID for astrologer",role);
@@ -683,7 +684,7 @@ const getFullKundliData = async (
   role
 ) => {
   logger.info(
-    `getFullKundliData called for userId=${userId}, isRelative=${isRelative}`,
+    `getFullKundliData called for userId=${userId}, isRelative=${isRelative} role=${role}`,
   );
 
   const profile = await getProfile(userId, isRelative, role);
