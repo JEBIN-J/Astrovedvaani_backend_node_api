@@ -168,10 +168,6 @@ const getFullKundliData = asyncHandler(async (req, res) => {
   const role = req.user?.role;
   let { userId, queryParams, isRelative } = extractCommonParams(req);
 
-  if (queryParams?.isAstroSide == "true") {
-    isRelative = false;
-  }
-
   console.log("Extracted Params for Full Kundli Data:", {
     userId,
     queryParams,
