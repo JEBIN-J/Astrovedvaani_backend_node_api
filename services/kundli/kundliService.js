@@ -123,7 +123,7 @@ const normalizeParams = (queryParams = {}, profile = {}) => {
 // 🔥 COMMON PROFILE FETCHER
 // =====================================================
 
-const getProfile = async (userId, isRelative, role) => {
+const getProfile = async (userId, isRelative, role=Enums.USER.ROLE.USER) => {
   console.log("isRelative", isRelative);
   console.log("userID", userId);
   console.log("role", role);
