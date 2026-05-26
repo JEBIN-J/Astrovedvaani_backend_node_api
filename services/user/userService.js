@@ -19,6 +19,86 @@ const Enums = require("../../utils/constants");
 const AstrologerOfferSchema = require("../../models/AstrologerOfferSchema");
 const { ASTROLOGERS_LIST } = CacheService.CACHE_PREFIXES;
 
+const ASTRO_BUSY_PREFIX = "astro:busy:";
+
+function getServicePriority(astrologer) {
+  const chat = astrologer.isChat ? 4 : 0;
+
+  const call = astrologer.isCall ? 2 : 0;
+
+  const video = astrologer.isVideo ? 1 : 0;
+
+  return chat + call + video;
+}
+
+function getOnlinePriority(astrologer) {
+  // ONLINE + FREE
+
+  if (astrologer.is_online && !astrologer.is_busy) {
+    return 3;
+  }
+
+  // BUSY
+
+  if (astrologer.is_busy) {
+    return 2;
+  }
+
+  // OFFLINE
+
+  return 1;
+}
+
+function encodeCursor(item) {
+  return Buffer.from(
+    JSON.stringify({
+      online_priority: item.online_priority,
+
+      service_priority: item.service_priority,
+
+      score: item.score,
+
+      _id: item._id,
+    }),
+  ).toString("base64");
+}
+
+function decodeCursor(cursor) {
+  try {
+    return JSON.parse(Buffer.from(cursor, "base64").toString());
+  } catch {
+    return null;
+  }
+}
+
+async function getBusyAstrologersMap(astrologerUserIds = []) {
+  try {
+    if (!astrologerUserIds.length) {
+      return new Map();
+    }
+
+    const pipeline = redisClient.multi();
+
+    astrologerUserIds.forEach((id) => {
+      pipeline.get(`${ASTRO_BUSY_PREFIX}${id}`);
+    });
+
+    const results = await pipeline.exec();
+
+    const busyMap = new Map();
+
+    astrologerUserIds.forEach((id, index) => {
+      busyMap.set(id.toString(), !!results[index]);
+    });
+
+    return busyMap;
+  } catch (err) {
+    logger.error("Error fetching busy astrologers", err);
+
+    return new Map();
+  }
+}
+
 exports.fetchAstrologers = async ({
   limit = 20,
   cursor = null,
@@ -31,51 +111,12 @@ exports.fetchAstrologers = async ({
   search,
 }) => {
   try {
-    logger.info(
-      `fetchAstrologers called with params limit=${limit}, cursor=${cursor}, filters=${JSON.stringify(
-        filters,
-      )}, sortPrice=${sortPrice}, sortExperience=${sortExperience}, sortRating=${sortRating}, gender=${gender}, userId=${userId}, search=${search}`,
-    );
-
-    const isCacheable =
-      !cursor &&
-      !filters?.["astrologer.is_online"] &&
-      !filters?.["astrologer.is_busy"] &&
-      !filters?.["astrologer.is_premium"] &&
-      !filters?.["is_free"] &&
-      !gender &&
-      !search;
-
-    logger.info(`isCacheable=${isCacheable}`);
-
-    const cacheKey = isCacheable
-      ? CacheService.generateKey(
-          ASTROLOGERS_LIST,
-          limit,
-          sortPrice || "",
-          sortExperience || "",
-          sortRating || "",
-          JSON.stringify(filters),
-        )
-      : null;
-
-    if (isCacheable) {
-      const cachedData = await CacheService.get(cacheKey);
-      if (cachedData) {
-        logger.info(`Returning cached astrologers for key=${cacheKey}`);
-        return cachedData;
-      }
-    }
-
-    // Default service type to CHAT if not provided
-    const DEFAULT_SERVICE_TYPE = Enums.SERVICE.TYPE.CHAT;
-    if (!filters["service_rates.service_type"]) {
-      filters["service_rates.service_type"] = DEFAULT_SERVICE_TYPE;
-    }
-
     let serviceTypeFilter = filters["service_rates.service_type"];
+
     let isFreeFilter = undefined;
+
     const rankingFilters = {};
+
     const astrologerMatchFilters = {};
 
     Object.entries(filters).forEach(([key, value]) => {
@@ -90,36 +131,13 @@ exports.fetchAstrologers = async ({
       }
     });
 
-    logger.info(`rankingFilters=${JSON.stringify(rankingFilters)}`);
-    logger.info(
-      `astrologerMatchFilters=${JSON.stringify(astrologerMatchFilters)}`,
-    );
-
     const aggregationPipeline = [];
 
-    // Cursor handling
-    if (cursor && !sortPrice && !sortExperience) {
-      const cursorDoc = await AstrologerRanking.findById(cursor).select({
-        score: 1,
-      });
-      logger.info(`cursorDoc=${JSON.stringify(cursorDoc)}`);
-      if (cursorDoc) {
-        aggregationPipeline.push({
-          $match: {
-            $or: [
-              { score: { $lt: cursorDoc.score } },
-              {
-                score: cursorDoc.score,
-                _id: { $gt: new mongoose.Types.ObjectId(cursor) },
-              },
-            ],
-          },
-        });
-      }
-    }
-
     aggregationPipeline.push(
-      { $match: rankingFilters },
+      {
+        $match: rankingFilters,
+      },
+
       {
         $lookup: {
           from: "astrologers",
@@ -128,7 +146,11 @@ exports.fetchAstrologers = async ({
           as: "astrologer",
         },
       },
-      { $unwind: "$astrologer" },
+
+      {
+        $unwind: "$astrologer",
+      },
+
       ...(Object.keys(astrologerMatchFilters).length
         ? [
             {
@@ -141,6 +163,7 @@ exports.fetchAstrologers = async ({
             },
           ]
         : []),
+
       {
         $lookup: {
           from: "users",
@@ -149,14 +172,32 @@ exports.fetchAstrologers = async ({
           as: "user",
         },
       },
-      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+
+      {
+        $unwind: {
+          path: "$user",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+
       {
         $match: {
           "user.isDeleted": false,
+
           "user.verificationStatus": Enums.USER.VERIFICATION_STATUS.APPROVED,
         },
       },
-      ...(gender ? [{ $match: { "user.gender": parseInt(gender) } }] : []),
+
+      ...(gender
+        ? [
+            {
+              $match: {
+                "user.gender": parseInt(gender),
+              },
+            },
+          ]
+        : []),
+
       {
         $lookup: {
           from: "astrologerservicerates",
@@ -165,18 +206,30 @@ exports.fetchAstrologers = async ({
           as: "service_rates",
         },
       },
-      { $match: { service_rates: { $ne: [], $exists: true } } },
+
+      {
+        $match: {
+          service_rates: {
+            $ne: [],
+            $exists: true,
+          },
+        },
+      },
+
       ...(serviceTypeFilter !== null
         ? [
             {
               $match: {
                 service_rates: {
-                  $elemMatch: { service_type: serviceTypeFilter },
+                  $elemMatch: {
+                    service_type: serviceTypeFilter,
+                  },
                 },
               },
             },
           ]
         : []),
+
       {
         $lookup: {
           from: "consultationsessions",
@@ -185,151 +238,269 @@ exports.fetchAstrologers = async ({
           as: "sessions",
         },
       },
+
       ...(isFreeFilter !== undefined
-        ? [{ $match: { "sessions.is_free": isFreeFilter } }]
+        ? [
+            {
+              $match: {
+                "sessions.is_free": isFreeFilter,
+              },
+            },
+          ]
         : []),
     );
 
-    // Handle search
+    // SEARCH
+
     if (search) {
-      const searchConditions = [
-        { "astrologer.display_name": { $regex: search, $options: "i" } },
-        { "user.name": { $regex: search, $options: "i" } },
-        { "astrologer.bio": { $regex: search, $options: "i" } },
-        { "astrologer.specializations": { $regex: search, $options: "i" } },
-        {
-          "astrologer.languages_spoken": {
-            $elemMatch: { $regex: search, $options: "i" },
-          },
+      aggregationPipeline.push({
+        $match: {
+          $or: [
+            {
+              "astrologer.display_name": {
+                $regex: search,
+                $options: "i",
+              },
+            },
+
+            {
+              "user.name": {
+                $regex: search,
+                $options: "i",
+              },
+            },
+
+            {
+              "astrologer.bio": {
+                $regex: search,
+                $options: "i",
+              },
+            },
+          ],
         },
-      ];
-      aggregationPipeline.push({ $match: { $or: searchConditions } });
-      logger.info(`Search conditions=${JSON.stringify(searchConditions)}`);
+      });
     }
 
     aggregationPipeline.push({
       $project: {
         _id: 1,
+
         ratings_avg: 1,
+
+        score: 1,
+
         astrologer: {
           $mergeObjects: [
             "$astrologer",
+
             {
               display_name: {
                 $ifNull: ["$astrologer.display_name", "$user.name"],
               },
-              profilePicture: { $ifNull: ["$user.profilePicture", null] },
+
+              profilePicture: {
+                $ifNull: ["$user.profilePicture", null],
+              },
             },
           ],
         },
+
         user: 1,
+
         service_rates: 1,
-        score: 1,
       },
     });
 
-    // Sort price by target service rate
-    if (sortPrice) {
-      const sortOrder = sortPrice === "asc" ? 1 : -1;
-      aggregationPipeline.push({
-        $addFields: {
-          target_rate: {
-            $arrayElemAt: [
-              {
-                $filter: {
-                  input: "$service_rates",
-                  as: "rate",
-                  cond: { $eq: ["$$rate.service_type", serviceTypeFilter] },
-                },
-              },
-              0,
-            ],
-          },
-        },
-      });
-      aggregationPipeline.push({ $sort: { "target_rate.rate": sortOrder } });
-    } else if (sortExperience) {
-      aggregationPipeline.push({
-        $sort: {
-          "astrologer.experience_years": sortExperience === "asc" ? 1 : -1,
-        },
-      });
-    } else if (sortRating) {
-      aggregationPipeline.push({
-        $sort: { ratings_avg: sortRating === "asc" ? 1 : -1 },
-      });
-    } else {
-      aggregationPipeline.push({ $sort: { score: -1, _id: 1 } });
-    }
+    // FETCH EXTRA FOR REDIS SORTING
 
-    aggregationPipeline.push({ $limit: limit + 1 });
+    aggregationPipeline.push({
+      $limit: 500,
+    });
 
     const result = await AstrologerRanking.aggregate(aggregationPipeline);
 
-    const hasMore = result.length > limit;
-    const data = hasMore ? result.slice(0, -1) : result;
+    // REDIS BULK FETCH
 
-    const formattedData = data.map((r) => ({
-      _id: r._id,
-      ratings_avg: r.ratings_avg || 0,
-      astrologer: {
+    const astrologerUserIds = result.map((r) =>
+      r.astrologer.user_id.toString(),
+    );
+
+    const busyMap = await getBusyAstrologersMap(astrologerUserIds);
+
+    let formattedData = result.map((r) => {
+      const isBusy = busyMap.get(r.astrologer.user_id.toString());
+
+      const astrologerData = {
         ...r.astrologer,
-        display_name: r.astrologer.display_name || r.user?.name || "Astrologer",
-        profilePicture:
-          r.astrologer.profilePicture || r.user?.profilePicture || null,
-        bio: r.astrologer.bio || "",
-        languages_spoken: r.astrologer.languages_spoken || [],
-        specializations: r.astrologer.specializations || [],
-        experience_years: r.astrologer.experience_years || 0,
-        is_online: r.astrologer.is_online || false,
-        is_premium: r.astrologer.is_premium || false,
-        is_busy: r.astrologer.is_busy || false,
+
+        is_busy: isBusy,
+
         services: {
           chat: r.astrologer.isChat || false,
+
           call: r.astrologer.isCall || false,
+
           video: r.astrologer.isVideo || false,
         },
-      },
-      user: r.user || null,
-      service_rates: r.service_rates || [],
-    }));
+      };
 
-    // Set follow info
+      return {
+        _id: r._id,
+
+        ratings_avg: r.ratings_avg || 0,
+
+        astrologer: astrologerData,
+
+        user: r.user || null,
+
+        service_rates: r.service_rates || [],
+
+        score: r.score || 0,
+
+        online_priority: getOnlinePriority(astrologerData),
+
+        service_priority: getServicePriority(astrologerData),
+      };
+    });
+
+    // FILTER BUSY
+
+    if (filters["astrologer.is_busy"] !== undefined) {
+      formattedData = formattedData.filter(
+        (item) => item.astrologer.is_busy === filters["astrologer.is_busy"],
+      );
+    }
+
+    // FINAL SORT
+
+    formattedData.sort((a, b) => {
+      // ONLINE > BUSY > OFFLINE
+
+      if (b.online_priority !== a.online_priority) {
+        return b.online_priority - a.online_priority;
+      }
+
+      // SERVICES
+
+      if (b.service_priority !== a.service_priority) {
+        return b.service_priority - a.service_priority;
+      }
+
+      // PREMIUM
+
+      if (b.astrologer.is_premium !== a.astrologer.is_premium) {
+        return (
+          Number(b.astrologer.is_premium) - Number(a.astrologer.is_premium)
+        );
+      }
+
+      // RATING
+
+      if (b.ratings_avg !== a.ratings_avg) {
+        return b.ratings_avg - a.ratings_avg;
+      }
+
+      // SCORE
+
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+
+      return String(a._id).localeCompare(String(b._id));
+    });
+
+    // CURSOR FILTER
+
+    if (cursor) {
+      const decoded = decodeCursor(cursor);
+
+      if (decoded) {
+        formattedData = formattedData.filter((item) => {
+          if (item.online_priority < decoded.online_priority) return true;
+
+          if (
+            item.online_priority === decoded.online_priority &&
+            item.service_priority < decoded.service_priority
+          )
+            return true;
+
+          if (
+            item.online_priority === decoded.online_priority &&
+            item.service_priority === decoded.service_priority &&
+            item.score < decoded.score
+          )
+            return true;
+
+          if (
+            item.online_priority === decoded.online_priority &&
+            item.service_priority === decoded.service_priority &&
+            item.score === decoded.score &&
+            String(item._id) > String(decoded._id)
+          )
+            return true;
+
+          return false;
+        });
+      }
+    }
+
+    // FINAL PAGINATION
+
+    const paginatedData = formattedData.slice(0, limit);
+
+    const hasMore = formattedData.length > limit;
+
+    const nextCursor =
+      hasMore && paginatedData.length
+        ? encodeCursor(paginatedData[paginatedData.length - 1])
+        : null;
+
+    // FOLLOW INFO
+
     if (userId) {
-      const astroIds = formattedData.map((r) => r.astrologer._id);
+      const astroIds = paginatedData.map((r) => r.astrologer._id);
+
       const follows = await FollowRequest.find({
         user_id: userId,
-        astrologer_id: { $in: astroIds },
+
+        astrologer_id: {
+          $in: astroIds,
+        },
       }).select("astrologer_id");
+
       const followedSet = new Set(
         follows.map((f) => f.astrologer_id.toString()),
       );
-      formattedData.forEach((item) => {
+
+      paginatedData.forEach((item) => {
         item.isFollow = followedSet.has(item.astrologer._id.toString());
       });
     } else {
-      formattedData.forEach((item) => {
+      paginatedData.forEach((item) => {
         item.isFollow = false;
       });
     }
 
-    const nextCursor =
-      formattedData.length > 0
-        ? formattedData[formattedData.length - 1]._id
-        : null;
-    const response = {
-      data: formattedData,
-      pagination: { hasMore, nextCursor },
+
+    return {
+      data: paginatedData,
+
+      pagination: {
+        hasMore,
+        nextCursor,
+      },
     };
-
-    if (isCacheable) {
-      await CacheService.set(cacheKey, response, CacheService.TTL.ASTROLOGER);
-    }
-
-    return response;
   } catch (err) {
-    logger.error(`Error fetching ranked astrologers: ${err.message}`);
-    return { data: [], pagination: { hasMore: false, nextCursor: null } };
+    logger.error(`Error fetching astrologers: ${err.message}`);
+
+    return {
+      data: [],
+
+      pagination: {
+        hasMore: false,
+        nextCursor: null,
+      },
+    };
   }
 };
 
