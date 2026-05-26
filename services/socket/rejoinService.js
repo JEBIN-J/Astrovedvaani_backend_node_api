@@ -40,7 +40,13 @@ module.exports = async function registerRejoinService(socketManager, socket) {
       ) {
         const now = new Date();
 
-        if (new Date(session.end_time) > now) {
+        const bufferTime = 60 * 1000;
+
+        const finalEndTime = new Date(
+          new Date(session.end_time).getTime() + bufferTime
+        );
+
+        if (finalEndTime > now) {
           const disconnectKey = `${sessionId}_${userId}`;
 
           if (socketManager.disconnectTimeouts.has(disconnectKey)) {
