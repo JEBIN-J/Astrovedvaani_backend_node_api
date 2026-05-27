@@ -337,3 +337,52 @@ exports.getCompleteKundliByUserId = asyncHandler(async (req, res) => {
     });
   }
 });
+
+exports.getMySalarySlips = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+
+  const {
+    page = 1,
+
+    limit = 10,
+
+    monthYear,
+
+    sortBy = "createdAt",
+
+    sortOrder = "desc",
+  } = req.query;
+
+  // =====================================
+  // OPTIONS
+  // =====================================
+  const options = {
+    page: parseInt(page),
+
+    limit: parseInt(limit),
+
+    monthYear,
+
+    sortBy,
+
+    sortOrder,
+  };
+
+  // =====================================
+  // FETCH
+  // =====================================
+  const result = await userService.fetchMySalarySlips(userId, options);
+
+  // =====================================
+  // RESPONSE
+  // =====================================
+  return res.status(200).json({
+    success: true,
+
+    message: "Salary slips fetched successfully",
+
+    data: result.data,
+
+    pagination: result.pagination,
+  });
+});

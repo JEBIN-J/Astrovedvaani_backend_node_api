@@ -24,6 +24,7 @@ const {
 } = require("../../errors");
 const Wallet = require("../../models/Wallet");
 const WalletLedger = require("../../models/Ledger");
+const SalarySlip = require("../../models/SalarySlip");
 const { CACHE_PREFIXES, ASTROLOGER_TTL, DEFAULT_TTL, SERVICE_RATES_TTL } =
   CacheService;
 const ASTROLOGER_CACHE_PREFIX = "astro:list";
@@ -701,6 +702,244 @@ const updateUserById = async (userId, updateData) => {
   return user.toObject();
 };
 
+const fetchSalarySlips = async (filters = {}, options = {}) => {
+  const {
+    page = 1,
+
+    limit = 10,
+
+    sortBy = "createdAt",
+
+    sortOrder = "desc",
+
+    searchTerm,
+
+    exportCsv = false,
+  } = options;
+
+  // =====================================
+  // SAFE FILTERS
+  // =====================================
+  const safeFilters = {};
+
+  // =====================================
+  // MONTH-YEAR FILTER
+  // FORMAT => 05-2026
+  // =====================================
+  if (filters.monthYear) {
+    const [month, year] = filters.monthYear.split("-");
+
+    if (month) {
+      safeFilters.month = Number(month);
+    }
+
+    if (year) {
+      safeFilters.year = Number(year);
+    }
+  }
+
+  // =====================================
+  // USER ID FILTER
+  // =====================================
+  if (filters.user_id) {
+    safeFilters.user_id = new mongoose.Types.ObjectId(filters.user_id);
+  }
+
+  // =====================================
+  // PIPELINE
+  // =====================================
+  const pipeline = [];
+
+  // =====================================
+  // MATCH
+  // =====================================
+  pipeline.push({
+    $match: safeFilters,
+  });
+
+  // =====================================
+  // USER LOOKUP
+  // =====================================
+  pipeline.push({
+    $lookup: {
+      from: "users",
+
+      localField: "user_id",
+
+      foreignField: "_id",
+
+      as: "user",
+    },
+  });
+
+  // =====================================
+  // UNWIND
+  // =====================================
+  pipeline.push({
+    $unwind: {
+      path: "$user",
+
+      preserveNullAndEmptyArrays: true,
+    },
+  });
+
+  // =====================================
+  // SEARCH
+  // =====================================
+  if (searchTerm) {
+    const s = searchTerm.trim();
+
+    pipeline.push({
+      $match: {
+        $or: [
+          {
+            "user.name": {
+              $regex: s,
+              $options: "i",
+            },
+          },
+
+          {
+            "user.email": {
+              $regex: s,
+              $options: "i",
+            },
+          },
+
+          {
+            slip_number: {
+              $regex: s,
+              $options: "i",
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  // =====================================
+  // SORT
+  // =====================================
+  pipeline.push({
+    $sort: {
+      [sortBy]: sortOrder === "asc" ? 1 : -1,
+    },
+  });
+
+  // =====================================
+  // COUNT PIPELINE
+  // =====================================
+  const countPipeline = JSON.parse(JSON.stringify(pipeline));
+
+  // =====================================
+  // PAGINATION
+  // =====================================
+  if (exportCsv !== true) {
+    pipeline.push({
+      $skip: (Number(page) - 1) * Number(limit),
+    });
+
+    pipeline.push({
+      $limit: Number(limit),
+    });
+  }
+
+  // =====================================
+  // PROJECT
+  // =====================================
+  pipeline.push({
+    $project: {
+      slip_number: 1,
+
+      month: 1,
+
+      year: 1,
+
+      total_chat_minutes: 1,
+
+      total_call_minutes: 1,
+
+      total_chat_earnings: {
+        $round: ["$total_chat_earnings", 0],
+      },
+
+      total_call_earnings: {
+        $round: ["$total_call_earnings", 0],
+      },
+
+      total_earnings: {
+        $round: ["$total_earnings", 0],
+      },
+
+      final_payout: {
+        $round: ["$final_payout", 0],
+      },
+
+      pdf_url: 1,
+
+      createdAt: 1,
+
+      user: {
+        _id: "$user._id",
+
+        name: "$user.name",
+
+        email: "$user.email",
+
+        mobileNumber: "$user.mobileNumber",
+
+        profilePicture: "$user.profilePicture",
+      },
+    },
+  });
+
+  // =====================================
+  // EXECUTE
+  // =====================================
+  const salarySlips = await SalarySlip.aggregate(pipeline);
+
+  // =====================================
+  // TOTAL COUNT
+  // =====================================
+  let totalCount = 0;
+
+  if (exportCsv === true) {
+    totalCount = salarySlips.length;
+  } else {
+    countPipeline.push({
+      $count: "total",
+    });
+
+    const countResult = await SalarySlip.aggregate(countPipeline);
+
+    totalCount = countResult?.[0]?.total || 0;
+  }
+
+  // =====================================
+  // PAGINATION RESPONSE
+  // =====================================
+  const pagination =
+    exportCsv === true
+      ? undefined
+      : {
+          totalDocs: totalCount,
+
+          totalPages: Math.ceil(totalCount / Number(limit)),
+
+          page: Number(page),
+
+          limit: Number(limit),
+        };
+
+  // =====================================
+  // RETURN
+  // =====================================
+  return {
+    data: salarySlips,
+
+    pagination,
+  };
+};
 module.exports = {
   createUserByAdmin,
   completeUser,
@@ -712,4 +951,5 @@ module.exports = {
   refreshUser,
   getUserById,
   updateUserById,
+  fetchSalarySlips,
 };

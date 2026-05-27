@@ -7,6 +7,7 @@ const {
   deleteUser,
   restoreUser,
   refreshUser,
+  fetchSalarySlips,
 } = require("../../services/admin/adminUserService");
 
 const CacheService = require("../../utils/redis/cacheService");
@@ -24,6 +25,8 @@ const {
 } = require("../../services/admin/AstrologerSkillsService");
 const Specialization = require("../../models/Specialization");
 const Language = require("../../models/Language");
+const SalarySlip = require("../../models/SalarySlip");
+const { buildPaginationResponse } = require("../../utils/pagination");
 
 exports.createUser = async (req, res) => {
   try {
@@ -413,3 +416,83 @@ async function buildUserFilters({
   logger.info("Final filters object:", filters);
   return filters;
 }
+
+exports.getSalarySlips = asyncHandler(async (req, res) => {
+  const {
+    page = 1,
+    limit = 10,
+    monthYear,
+    userId,
+    search,
+    sortBy = "createdAt",
+    sortOrder = "desc",
+    exportCsv = "false",
+  } = req.query;
+
+  // =====================================
+  // FILTERS
+  // =====================================
+  const filters = {};
+
+  if (monthYear) {
+    filters.monthYear = monthYear;
+  }
+
+  if (userId) {
+    filters.user_id = userId;
+  }
+
+  // =====================================
+  // OPTIONS
+  // =====================================
+  const options = {
+    page: parseInt(page),
+    limit: parseInt(limit),
+    sortBy,
+    sortOrder,
+    exportCsv: exportCsv === "true",
+    searchTerm: search,
+  };
+
+  // =====================================
+  // FETCH
+  // =====================================
+  const result = await fetchSalarySlips(filters, options);
+
+  // =====================================
+  // CSV EXPORT
+  // =====================================
+  if (options.exportCsv) {
+    const { Parser } = require("json2csv");
+
+    const fields = [
+      "slip_number",
+      "month",
+      "year",
+      "total_earnings",
+      "final_payout",
+      "pdf_url",
+    ];
+
+    const parser = new Parser({ fields });
+
+    const csv = parser.parse(result.data);
+
+    res.header("Content-Type", "text/csv");
+
+    return res.attachment("salary_slips.csv").send(csv);
+  }
+
+  // =====================================
+  // RESPONSE
+  // =====================================
+  return res.status(200).json({
+    success: true,
+    message: "Salary slips fetched successfully",
+    data: result.data,
+
+    pagination: result.pagination
+      ? buildPaginationResponse(result.pagination)
+      : undefined,
+  });
+});

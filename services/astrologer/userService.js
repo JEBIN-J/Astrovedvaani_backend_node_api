@@ -1,12 +1,13 @@
-const Feedback = require('../../models/Feedback');
-const User = require('../../models/User');
-const logger = require('../../utils/logger');
-const { buildPaginationResponse } = require('../../utils/pagination');
+const Feedback = require("../../models/Feedback");
+const SalarySlip = require("../../models/SalarySlip");
+const User = require("../../models/User");
+const logger = require("../../utils/logger");
+const { buildPaginationResponse } = require("../../utils/pagination");
 
 exports.fetchUserDetailsById = async (userId) => {
   try {
     const user = await User.findById(userId)
-      .select('-password -apiKeys.secret')
+      .select("-password -apiKeys.secret")
       .lean();
 
     if (!user) return null;
@@ -35,12 +36,12 @@ exports.fetchUserDetailsById = async (userId) => {
       createdBy: user.createdBy || null,
       description: user.description || null,
       createdAt: user.createdAt || null,
-      updatedAt: user.updatedAt || null
+      updatedAt: user.updatedAt || null,
     };
 
     return normalizedUser;
   } catch (err) {
-    logger.error('Error in fetchUserDetailsById:', err);
+    logger.error("Error in fetchUserDetailsById:", err);
     return null;
   }
 };
@@ -49,7 +50,7 @@ exports.getFeedbackForAstrologer = async (
   astrologerUserId,
   page = 1,
   limit = 10,
-  filters = {}
+  filters = {},
 ) => {
   logger.info("[getFeedbackForAstrologer] Called", {
     astrologerUserId,
@@ -115,5 +116,103 @@ exports.getFeedbackForAstrologer = async (
       page,
       limit,
     }),
+  };
+};
+exports.fetchMySalarySlips = async (userId, options = {}) => {
+  const {
+    page = 1,
+
+    limit = 10,
+
+    monthYear,
+
+    sortBy = "createdAt",
+
+    sortOrder = "desc",
+  } = options;
+
+  // =====================================
+  // FILTERS
+  // =====================================
+  const filters = {
+    user_id: userId,
+  };
+
+  // =====================================
+  // MONTH-YEAR FILTER
+  // FORMAT => 05-2026
+  // =====================================
+  if (monthYear) {
+    const [month, year] = monthYear.split("-");
+
+    if (month) {
+      filters.month = Number(month);
+    }
+
+    if (year) {
+      filters.year = Number(year);
+    }
+  }
+
+  // =====================================
+  // PAGINATION
+  // =====================================
+  const skip = (Number(page) - 1) * Number(limit);
+
+  // =====================================
+  // FETCH
+  // =====================================
+  const [salarySlips, total] = await Promise.all([
+    SalarySlip.find(filters)
+      .populate({
+        path: "user_id",
+
+        select: "name email mobileNumber profilePicture",
+      })
+      .sort({
+        [sortBy]: sortOrder === "asc" ? 1 : -1,
+      })
+      .skip(skip)
+      .limit(Number(limit))
+      .lean(),
+
+    SalarySlip.countDocuments(filters),
+  ]);
+
+  // =====================================
+  // ROUND OFF
+  // =====================================
+  const formattedSlips = salarySlips.map((item) => ({
+    ...item,
+
+    total_earnings: Math.round(Number(item.total_earnings || 0)),
+
+    final_payout: Math.round(Number(item.final_payout || 0)),
+
+    total_chat_earnings: Math.round(Number(item.total_chat_earnings || 0)),
+
+    total_call_earnings: Math.round(Number(item.total_call_earnings || 0)),
+  }));
+
+  // =====================================
+  // PAGINATION
+  // =====================================
+  const pagination = {
+    totalDocs: total,
+
+    totalPages: Math.ceil(total / Number(limit)),
+
+    page: Number(page),
+
+    limit: Number(limit),
+  };
+
+  // =====================================
+  // RETURN
+  // =====================================
+  return {
+    data: formattedSlips,
+
+    pagination,
   };
 };

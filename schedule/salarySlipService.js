@@ -7,51 +7,63 @@ const { generateSalarySlipPdf } = require("../services/salarySlipService");
 const Enums = require("../utils/constants");
 
 exports.startSalarySlipCron = () => {
-  // TEST: Every 1 minute
-  cron.schedule("* * * * *", async () => {
-    try {
-      console.log("Starting monthly salary slip cron...");
-
-      // Test month/year
-      const month = 5;
-
-      const year = 2026;
-
-      // ONLY ONE ASTROLOGER
-      const astrologer = await User.findOne({
-        _id: "6a0466199f02a7e988cfefb7",
-        role: Enums.USER.ROLE.ASTROLOGER,
-        isActive: true,
-      }).lean();
-
-      if (!astrologer) {
-        console.log("No astrologer found");
-
-        return;
-      }
-
-      console.log(`Generating salary slip for astrologer ${astrologer._id}`);
-
+  // RUN EVERY MONTH ON 1ST DATE AT 12:00 AM IST
+  cron.schedule(
+    "0 0 1 * *",
+    async () => {
       try {
-        await generateSalarySlipPdf({
-          userId: astrologer._id,
+        console.log("Starting salary slip generation...");
 
-          month,
+        const currentDate = new Date();
 
-          year,
-        });
+        let month = currentDate.getMonth(); // PREVIOUS MONTH
+        let year = currentDate.getFullYear();
 
-        console.log(`Salary slip generated for astrologer ${astrologer._id}`);
-      } catch (err) {
-        console.error(
-          `Salary slip failed for astrologer ${astrologer._id}`,
-          err,
-        );
+        // HANDLE JANUARY CASE
+        if (month === 0) {
+          month = 12;
+
+          year = year - 1;
+        }
+
+        console.log(`Generating salary slips for ${month}-${year}`);
+
+        const astrologers = await User.find({
+          role: Enums.USER.ROLE.ASTROLOGER,
+
+          isActive: true,
+        }).lean();
+
+        console.log(`Generating slips for ${astrologers.length} astrologers`);
+
+        for (const astrologer of astrologers) {
+          try {
+            await generateSalarySlipPdf({
+              userId: astrologer._id,
+
+              month,
+
+              year,
+            });
+
+            console.log(
+              `Salary slip generated for astrologer ${astrologer._id}`,
+            );
+          } catch (err) {
+            console.error(
+              `Salary slip failed for astrologer ${astrologer._id}`,
+              err.message,
+            );
+          }
+        }
+
+        console.log("Salary slip generation completed");
+      } catch (error) {
+        console.error("Salary Slip Cron Error:", error);
       }
-
-      console.log("Monthly salary slip cron completed");
-    } catch (error) {
-      console.error("Salary Slip Cron Error:", error);
-    }
-  });
+    },
+    {
+      timezone: "Asia/Kolkata",
+    },
+  );
 };

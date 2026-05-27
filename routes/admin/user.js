@@ -15,5 +15,5 @@ router.delete("/delete", adminUserController.deleteUser);
 router.patch("/restore", adminUserController.restoreUser);
 router.patch("/refresh", adminUserController.refreshUser);
 router.post("/send", notifyController.sendAdminNotification);
-
+router.get("/fetch-salary-slips", adminUserController.getSalarySlips);
 module.exports = router;
