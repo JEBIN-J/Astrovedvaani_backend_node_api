@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+
+  <title>Salary Slip</title>
+
+  <style>
+    body {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 12px;
+      color: #333;
+      margin: 20px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+    }
+
+    .header img {
+      width: 120px;
+    }
+
+    .header .company-details {
+      text-align: right;
+      font-size: 11px;
+    }
+
+    h2 {
+      margin: 5px 0;
+      font-size: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 15px;
+    }
+
+    th,
+    td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background-color: #f9f9f9;
+    }
+
+    .summary-table th,
+    .summary-table td {
+      text-align: right;
+    }
+
+    .footer {
+      text-align: center;
+      font-size: 10px;
+      color: #777;
+      border-top: 1px solid #eee;
+      padding-top: 5px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Header -->
+  <div class="header">
+
+    <img src="https://api.astrovedvaani.com/uploads/ved.png" alt="Vedvaani Logo" />
+
+    <div class="company-details">
+
+      <strong>Vedvaani</strong><br>
+
+      📍 1137, Bhutani Alphathum,
+      Sector 90, Noida,
+      India, 201301 <br>
+
+      ✉ support@vedvaani.com <br>
+
+      ☎ +91 96278 65333
+
+    </div>
+
+  </div>
+
+  <!-- Slip Info -->
+  <h2>
+    Salary Slip #
+    <%= slipNumber %>
+  </h2>
+
+  <p>
+    Month:
+    <%= month %>/<%= year %>
+  </p>
+
+  <p>
+    Generated On:
+    <%= new Date().toLocaleDateString() %>
+  </p>
+
+  <!-- Astrologer Details -->
+  <table>
+
+    <tr>
+      <th colspan="2">
+        Astrologer Details
+      </th>
+    </tr>
+
+    <tr>
+      <td>
+        <strong>Name</strong>
+      </td>
+
+      <td>
+        <%= astrologer.name %>
+      </td>
+    </tr>
+
+    <tr>
+      <td>
+        <strong>Email</strong>
+      </td>
+
+      <td>
+        <%= astrologer.email %>
+      </td>
+    </tr>
+
+  </table>
+
+  <!-- Service Summary -->
+  <table>
+
+    <thead>
+
+      <tr>
+
+        <th>Service Type</th>
+
+        <th>Total Minutes</th>
+
+        <th>Total Earnings</th>
+
+      </tr>
+
+    </thead>
+
+    <tbody>
+
+      <!-- CHAT -->
+      <% if(totalChatMinutes > 0 || totalChatEarnings > 0){ %>
+
+        <tr>
+
+          <td>CHAT</td>
+
+          <td>
+            <%= totalChatMinutes %> Minutes
+          </td>
+
+          <td>
+            ₹<%= Math.round(totalChatEarnings) %>
+          </td>
+
+        </tr>
+
+      <% } %>
+
+      <!-- CALL -->
+      <% if(totalCallMinutes > 0 || totalCallEarnings > 0){ %>
+
+        <tr>
+
+          <td>CALL</td>
+
+          <td>
+            <%= totalCallMinutes %> Minutes
+          </td>
+
+          <td>
+            ₹<%= Math.round(totalCallEarnings) %>
+          </td>
+
+        </tr>
+
+      <% } %>
+
+      <!-- VIDEO -->
+      <% if(totalVideoMinutes > 0 || totalVideoEarnings > 0){ %>
+
+        <tr>
+
+          <td>VIDEO CALL</td>
+
+          <td>
+            <%= totalVideoMinutes %> Minutes
+          </td>
+
+          <td>
+            ₹<%= Math.round(totalVideoEarnings) %>
+          </td>
+
+        </tr>
+
+      <% } %>
+
+    </tbody>
+
+  </table>
+
+  <!-- Final Summary -->
+  <table class="summary-table">
+
+    <tr>
+
+      <th>Total Minutes</th>
+
+      <td>
+        <%= totalChatMinutes + totalCallMinutes + totalVideoMinutes %>
+        Minutes
+      </td>
+
+    </tr>
+
+    <tr>
+
+      <th>Total Earnings</th>
+
+      <td>
+        ₹<%= Math.round(totalEarnings) %>
+      </td>
+
+    </tr>
+
+    <tr>
+
+      <th>Final Payout</th>
+
+      <td>
+        ₹<%= Math.round(finalPayout) %>
+      </td>
+
+    </tr>
+
+  </table>
+
+  <!-- Footer -->
+  <div class="footer">
+
+    This is a computer-generated salary slip.
+    Thank you for working with Vedvaani.
+
+  </div>
+
+</body>
+
+</html>

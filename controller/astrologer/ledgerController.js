@@ -1,7 +1,7 @@
-const ledgerService = require('../../services/astrologer/ledgerService');
-const { buildPaginationResponse } = require('../../utils/pagination');
-const asyncHandler = require('../../middlewares/asyncHandler');
-const { BadRequestError } = require('../../errors');
+const ledgerService = require("../../services/astrologer/ledgerService");
+const { buildPaginationResponse } = require("../../utils/pagination");
+const asyncHandler = require("../../middlewares/asyncHandler");
+const { BadRequestError } = require("../../errors");
 exports.getMyLedger = async (req, res, next) => {
   try {
     const astrologerUserId = req.user._id;
@@ -19,10 +19,17 @@ exports.getMyLedger = async (req, res, next) => {
       external_transaction_id: req.query.external_transaction_id,
       order_id: req.query.order_id,
     };
-    const result = await ledgerService.getMyLedger(astrologerUserId, page, limit, filters);
+    const result = await ledgerService.getMyLedger(
+      astrologerUserId,
+      page,
+      limit,
+      filters,
+    );
     res.status(200).json({
       success: true,
       data: result.bookings,
+      currentMonthEarnings: result.currentMonthEarnings,
+      totalEarnings: result.totalEarnings,
       pagination: buildPaginationResponse({
         totalDocs: result.total,
         totalPages: Math.ceil(result.total / limit),
@@ -31,10 +38,10 @@ exports.getMyLedger = async (req, res, next) => {
       }),
     });
   } catch (error) {
-    console.error('Error fetching ledger:', error);
+    console.error("Error fetching ledger:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Internal Server Error',
+      message: error.message || "Internal Server Error",
     });
   }
 };
@@ -49,33 +56,42 @@ exports.getAstroAnalyticsController = async (req, res) => {
     else if (startDate && endDate) {
       dateFilter.customRange = {
         start: startDate,
-        end: endDate
+        end: endDate,
       };
     }
-    const data = await ledgerService.getAstrologerAnalytics(astrologerUserId, dateFilter);
+    const data = await ledgerService.getAstrologerAnalytics(
+      astrologerUserId,
+      dateFilter,
+    );
     return res.status(200).json({
       success: true,
       data,
     });
   } catch (error) {
-    console.error('Error in astrologer analytics:', error);
+    console.error("Error in astrologer analytics:", error);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error',
+      message: "Internal server error",
     });
   }
 };
 
 exports.withdrawRequest = asyncHandler(async (req, res) => {
   const astrologerUserId = req.user._id;
-  const { amount ,remarks} = req.body;
+  const { amount, remarks } = req.body;
   if (!amount || amount <= 0) {
-    throw new BadRequestError("Withdrawal amount is required and must be greater than 0");
+    throw new BadRequestError(
+      "Withdrawal amount is required and must be greater than 0",
+    );
   }
   // if (amount < 500) {
   //   throw new BadRequestError("Minimum withdrawal amount is ₹500");
   // }
-  const withdrawalRequest = await ledgerService.createWithdrawalRequest(astrologerUserId, amount,remarks);
+  const withdrawalRequest = await ledgerService.createWithdrawalRequest(
+    astrologerUserId,
+    amount,
+    remarks,
+  );
   res.status(201).json({
     success: true,
     data: withdrawalRequest,
@@ -103,4 +119,3 @@ exports.myWithdrawRequests = asyncHandler(async (req, res) => {
     pagination,
   });
 });
-

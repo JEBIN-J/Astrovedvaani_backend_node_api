@@ -11,46 +11,184 @@ const { BadRequestError, InsufficientBalanceError } = require("../../errors");
 const { buildPaginationResponse } = require("../../utils/pagination");
 const LiveSession = require("../../models/LiveSession");
 const roundOff = (value) => Number(Number(value).toFixed(2));
+async function getAstrologerEarnings(userId, filters = {}) {
+  try {
+    const wallet = await Wallet.findOne({
+      user_id: userId,
+    }).lean();
+
+    if (!wallet) {
+      return {
+        currentMonthEarnings: 0,
+        totalEarnings: 0,
+      };
+    }
+
+    const now = new Date();
+
+    // ==============================
+    // CURRENT MONTH RANGE
+    // ==============================
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const baseMatch = {
+      wallet_id: wallet._id,
+
+      direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+
+      payment_status: Enums.PAYMENT.STATUS.PAID,
+    };
+
+    // ==============================
+    // CURRENT MONTH EARNINGS
+    // ==============================
+    const currentMonthAgg = await WalletLedger.aggregate([
+      {
+        $match: {
+          ...baseMatch,
+
+          createdAt: {
+            $gte: currentMonthStart,
+            $lt: nextMonthStart,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    // ==============================
+    // TOTAL / FILTERED EARNINGS
+    // ==============================
+    const totalMatch = {
+      ...baseMatch,
+    };
+
+    if (filters.startDate || filters.endDate) {
+      totalMatch.createdAt = {};
+
+      if (filters.startDate) {
+        totalMatch.createdAt.$gte = new Date(filters.startDate);
+      }
+
+      if (filters.endDate) {
+        totalMatch.createdAt.$lte = new Date(filters.endDate);
+      }
+    }
+
+    const totalAgg = await WalletLedger.aggregate([
+      {
+        $match: totalMatch,
+      },
+      {
+        $group: {
+          _id: null,
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    return {
+      currentMonthEarnings: Number(currentMonthAgg[0]?.total || 0),
+
+      totalEarnings: Number(totalAgg[0]?.total || 0),
+    };
+  } catch (error) {
+    console.error("getAstrologerEarnings Error:", error);
+
+    return {
+      currentMonthEarnings: 0,
+      totalEarnings: 0,
+    };
+  }
+}
 
 exports.getMyLedger = async (userId, page = 1, limit = 10, filters = {}) => {
-  const wallet = await Wallet.findOne({ user_id: userId });
+  const wallet = await Wallet.findOne({
+    user_id: userId,
+  });
+
   if (!wallet) {
-    logger.warn("No wallet found for user", { userId });
-    return { bookings: [], total: 0 };
+    logger.warn("No wallet found for user", {
+      userId,
+    });
+
+    return {
+      bookings: [],
+      total: 0,
+      currentMonthEarnings: 0,
+      totalEarnings: 0,
+    };
   }
+
   const query = {
     wallet_id: wallet._id,
   };
+
+  // ==============================
+  // DATE FILTER
+  // ==============================
   if (filters.startDate || filters.endDate) {
-    query.timestamp = {};
-    if (filters.startDate) query.timestamp.$gte = new Date(filters.startDate);
-    if (filters.endDate) query.timestamp.$lte = new Date(filters.endDate);
+    query.createdAt = {};
+
+    if (filters.startDate) {
+      query.createdAt.$gte = new Date(filters.startDate);
+    }
+
+    if (filters.endDate) {
+      query.createdAt.$lte = new Date(filters.endDate);
+    }
   }
+
+  // ==============================
+  // OTHER FILTERS
+  // ==============================
   if (filters.transaction_type) {
     query.transaction_type = parseInt(filters.transaction_type);
   }
+
   if (filters.direction) {
     query.direction = parseInt(filters.direction);
   }
+
   if (filters.payment_status) {
     query.payment_status = parseInt(filters.payment_status);
   }
+
   if (filters.payment_method) {
     query.payment_method = parseInt(filters.payment_method);
   }
+
   if (filters.payment_provider) {
     query.payment_provider = parseInt(filters.payment_provider);
   }
+
   if (filters.related_entity_type) {
     query.related_entity_type = filters.related_entity_type;
   }
+
   if (filters.external_transaction_id) {
     query.external_transaction_id = filters.external_transaction_id;
   }
+
   if (filters.order_id) {
     query.order_id = filters.order_id;
   }
+
   const skip = (page - 1) * limit;
+
   logger.info("Fetching wallet ledger", {
     userId,
     walletId: wallet._id,
@@ -60,16 +198,31 @@ exports.getMyLedger = async (userId, page = 1, limit = 10, filters = {}) => {
     query,
     skip,
   });
-  const [bookings, total] = await Promise.all([
-    WalletLedger.find(query)
-      .sort({ timestamp: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
 
-    WalletLedger.countDocuments(query),
-  ]);
-  return { bookings, total };
+  const [bookings, total, { currentMonthEarnings, totalEarnings }] =
+    await Promise.all([
+      WalletLedger.find(query)
+        .sort({
+          createdAt: -1,
+        })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      WalletLedger.countDocuments(query),
+
+      getAstrologerEarnings(userId, filters),
+    ]);
+
+  return {
+    bookings,
+
+    total,
+
+    currentMonthEarnings,
+
+    totalEarnings,
+  };
 };
 exports.getAstrologerAnalytics = async (astrologerUserId, dateFilter = {}) => {
   const dateCondition = getDateCondition(dateFilter);
@@ -176,10 +329,10 @@ async function getSessionAnalytics(astrologerUserId, dateCondition) {
       item._id === Enums.SERVICE.TYPE.CHAT
         ? "CHAT"
         : item._id === Enums.SERVICE.TYPE.VIDEO
-        ? "VIDEO"
-        : item._id === Enums.SERVICE.TYPE.CALL
-        ? "CALL"
-        : null;
+          ? "VIDEO"
+          : item._id === Enums.SERVICE.TYPE.CALL
+            ? "CALL"
+            : null;
 
     if (key) {
       counts[key] = {
@@ -299,10 +452,10 @@ async function getPoojaAnalytics(astrologerId, dateCondition) {
       item._id === Enums.ORDER.STATUS.PENDING
         ? "PENDING"
         : item._id === Enums.ORDER.STATUS.DELIVERED
-        ? "COMPLETED"
-        : item._id === Enums.ORDER.STATUS.CANCELLED
-        ? "CANCELLED"
-        : null;
+          ? "COMPLETED"
+          : item._id === Enums.ORDER.STATUS.CANCELLED
+            ? "CANCELLED"
+            : null;
 
     if (key) {
       counts[key] = {

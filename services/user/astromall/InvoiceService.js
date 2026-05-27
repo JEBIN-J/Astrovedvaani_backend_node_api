@@ -237,3 +237,5 @@ const uploadPDF = async (pdfFullPath) => {
   logger.info(`[Invoice] PDF uploaded url=${res.data.url}`);
   return res.data.url;
 };
+
+module.exports = { uploadPDF };

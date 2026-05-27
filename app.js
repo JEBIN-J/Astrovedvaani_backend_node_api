@@ -17,6 +17,11 @@ const app = express();
 app.set("trust proxy", 1);
 require("./schedule/notificationWorker");
 app.use(express.static(__dirname + "/public"));
+// server.js
+
+const { startSalarySlipCron } = require("./schedule/salarySlipService");
+
+startSalarySlipCron();
 
 const initializeDB = async () => {
   try {
