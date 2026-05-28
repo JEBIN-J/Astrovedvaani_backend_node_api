@@ -77,6 +77,26 @@ const Enums = {
       NO_SHOW: 503,
       ONGOING: 504,
     },
+    STATUS_REASON: {
+      CANCELLED: {
+        ASTROLOGER_REJECTED: 1001,
+        AUTO_REJECTED: 1002,
+        USER_CANCELLED: 1003,
+      },
+
+      COMPLETED: {
+        USER_NETWORK_ISSUE: 2001,
+        ASTROLOGER_NETWORK_ISSUE: 2002,
+        ASTROLOGER_ENDED: 2003,
+        USER_ENDED: 2004,
+        DURATION_EXPIRED: 2005,
+      },
+
+      NO_SHOW: {
+        USER_NO_SHOW: 3001,
+        ASTROLOGER_NO_SHOW: 3002,
+      },
+    },
     FOLLOW: {
       PENDING: 505,
       ACCEPTED: 506,

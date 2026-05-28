@@ -327,8 +327,12 @@ exports.fetchAstrologers = async ({
 
     const busyMap = await getBusyAstrologersMap(astrologerUserIds);
 
+    console.log("Busy Map:", busyMap);
+
     let formattedData = result.map((r) => {
       const isBusy = busyMap.get(r.astrologer.user_id.toString());
+
+      console.log(`Astrologer ${r.astrologer._id} busy status:`, isBusy);
 
       const astrologerData = {
         ...r.astrologer,
@@ -362,6 +366,8 @@ exports.fetchAstrologers = async ({
         service_priority: getServicePriority(astrologerData),
       };
     });
+
+    console.log("Formatted Data Sample:", formattedData[0]);
 
     // FILTER BUSY
 
@@ -447,6 +453,8 @@ exports.fetchAstrologers = async ({
     // FINAL PAGINATION
 
     const paginatedData = formattedData.slice(0, limit);
+
+    console.log("Paginated Data", paginatedData);
 
     const hasMore = formattedData.length > limit;
 

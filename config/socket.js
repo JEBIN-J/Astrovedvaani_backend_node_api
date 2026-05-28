@@ -132,6 +132,10 @@ class SocketManager {
             const billableMinutes = Math.min(usedMinutes, session.duration_minutes);
             const finalAmount = session.is_free ? 0 : billableMinutes * session.rate_per_minute;
             logger.info(`[TIMEOUT] Auto-ending session ${sessionId}`);
+            const isAstrologer = userId.toString() === session.astrologer_user_id.toString();
+            const statusReason = isAstrologer
+              ? Enums.SERVICE.STATUS_REASON.COMPLETED.USER_NETWORK_ISSUE
+              : Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_NETWORK_ISSUE;
             await ConsultationSession.findByIdAndUpdate(
               sessionId,
               {
@@ -141,6 +145,8 @@ class SocketManager {
                 duration_minutes: billableMinutes,
                 total_amount: finalAmount,
                 payment_status: Enums.PAYMENT.STATUS.COMPLETED,
+                status: Enums.SERVICE.STATUS.COMPLETED,
+                status_reason: statusReason,
               },
               { new: true }
             );

@@ -57,10 +57,13 @@ function handleChatRequestEvents(socketManager, socket) {
         });
       }
       const busySessionId = await CacheService.isAstrologerBusy(astrologerId);
-      console.log(`Checked busy status for astrologer ${astrologerId}: ${busySessionId ? "Busy" : "Available"}`,
+      console.log(
+        `Checked busy status for astrologer ${astrologerId}: ${busySessionId ? "Busy" : "Available"}`,
       );
       if (busySessionId) {
-        console.log(`Astrologer ${astrologerId} is currently busy with session ${busySessionId}`);
+        console.log(
+          `Astrologer ${astrologerId} is currently busy with session ${busySessionId}`,
+        );
         return callback?.({ success: false, message: "Astrologer is Busy" });
       }
       if (busySessionId) {
@@ -141,7 +144,7 @@ function handleChatRequestEvents(socketManager, socket) {
             payload.message,
             payload,
             "chat_messages",
-            "hindi.mp3"
+            "hindi.mp3",
           );
           logger.info(
             `[SOCKET] Firebase push ${pushSent ? "succeeded" : "failed"} for astrologer ${astrologerId}`,
@@ -289,6 +292,8 @@ function handleChatRequestEvents(socketManager, socket) {
             sessionId,
             {
               status: Enums.SERVICE.STATUS.CANCELLED,
+              status_reason:
+                Enums.SERVICE.STATUS_REASON.CANCELLED.USER_CANCELLED,
               cancellation_reason: cancelReason,
             },
             { new: true },
@@ -415,9 +420,11 @@ function handleChatRequestEvents(socketManager, socket) {
           );
           await clearSession(sessionId);
           await clearInSession(sessionId);
+          const statusReason = Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
           const result = await finalizeSession(
             sessionId,
             userId,
+            statusReason,
             "Auto-ended by system on duration expiry",
           );
           if (result) {
@@ -795,9 +802,12 @@ function handleChatRequestEvents(socketManager, socket) {
 
           await clearInSession(sessionId);
 
+          const statusReason = Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
+
           const result = await finalizeSession(
             sessionId,
             userId,
+            statusReason,
             "Auto-ended after extended time",
           );
 
@@ -950,6 +960,8 @@ function handleChatRequestEvents(socketManager, socket) {
         sessionId,
         {
           status: Enums.SERVICE.STATUS.REJECTED,
+          status_reason:
+            Enums.SERVICE.STATUS_REASON.REJECTED.ASTROLOGER_REJECTED,
           rejection_reason: rejectionReason,
         },
         { new: true },
@@ -1110,7 +1122,13 @@ function handleChatRequestEvents(socketManager, socket) {
           logger.info(
             `[SOCKET] finalizeSession completed for sessionId=${sessionId}`,
           );
-          await finalizeSession(sessionId, userId);
+
+          const isAstrologer =
+            userId.toString() === session.astrologer_user_id.toString();
+          const statusReason = isAstrologer
+            ? Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_ENDED
+            : Enums.SERVICE.STATUS_REASON.COMPLETED.USER_ENDED;
+          await finalizeSession(sessionId, userId, statusReason);
         } catch (err) {
           logger.error(
             "[SOCKET] chat_session_end background finalize error:",

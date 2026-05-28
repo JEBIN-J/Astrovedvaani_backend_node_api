@@ -22,7 +22,8 @@ function autoRejectSession(
         await ConsultationSession.findByIdAndUpdate(
           sessionId,
           {
-            status: Enums.SERVICE.STATUS.REJECTED,
+            status: Enums.SERVICE.STATUS.NO_SHOW,
+            status_reason: Enums.SERVICE.STATUS_REASON.NO_SHOW.ASTROLOGER_NO_SHOW,
             rejection_reason: rejectionReason,
           },
           { new: true },

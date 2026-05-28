@@ -174,7 +174,7 @@ async function createLedgerEntriesForSession(sessionId) {
     return { success: false, error: error.message };
   }
 }
-async function finalizeSession(sessionId, endedBy, forcedEndReason = null) {
+async function finalizeSession(sessionId, endedBy, statusReason, forcedEndReason = null) {
   logger.info(
     `[Session] Starting finalizeSession for sessionId=${sessionId}, endedBy=${endedBy}, forcedEndReason=${forcedEndReason}`,
   );
@@ -235,6 +235,7 @@ async function finalizeSession(sessionId, endedBy, forcedEndReason = null) {
   // --- Update session ---
   await session.updateOne({
     status: Enums.SERVICE.STATUS.COMPLETED,
+    status_reason: statusReason,
     completed_at: new Date(),
     end_time: endTime,
     duration_minutes: totalConsumedMinutes,
