@@ -16,7 +16,7 @@ class RedisClient {
             return Math.min(retries * 200, 2000);
           },
         },
-        database: Number(REDIS_DB), // KEY PART
+        database: Number(REDIS_DB),
       });
 
       this.client.on("connect", () =>
@@ -46,24 +46,41 @@ class RedisClient {
     }
   }
 
+  // ---------------- BASIC METHODS ----------------
+
   get(key) {
     return this.client.get(key);
   }
+
   set(key, value) {
     return this.client.set(key, value);
   }
+
   setEx(key, ttl, value) {
     return this.client.setEx(key, ttl, value);
   }
+
   del(key) {
     return this.client.del(key);
   }
+
   keys(pattern) {
     return this.client.keys(pattern);
   }
+
   ping() {
     return this.client.ping();
   }
+
+  expire(key, ttl) {
+    return this.client.expire(key, ttl);
+  }
+
+  async incr(key) {
+    return this.client.incr(key);
+  }
+
+  // ---------------- SET METHODS ----------------
 
   sMembers(key) {
     return this.client.sMembers(key);
@@ -77,20 +94,46 @@ class RedisClient {
     return this.client.sRem(key, members);
   }
 
-  expire(key, ttl) {
-    return this.client.expire(key, ttl);
+  // ---------------- MULTI / PIPELINE ----------------
+
+  multi() {
+    return this.client.multi();
   }
+
+  /**
+   * Execute multiple GET commands
+   * @param {string[]} keys
+   * @returns {Promise<Array>}
+   */
+  async mGet(keys = []) {
+    if (!keys.length) return [];
+    return this.client.mGet(keys);
+  }
+
+  /**
+   * Execute pipeline safely
+   * @param {Function} callback
+   * @returns {Promise<Array>}
+   */
+  async pipeline(callback) {
+    const multi = this.client.multi();
+
+    callback(multi);
+
+    return await multi.exec();
+  }
+
+  // ---------------- FLUSH METHODS ----------------
 
   async flushDb() {
     await this.client.flushDb();
   }
+
   async flushAll() {
     await this.client.flushAll();
   }
 
-  async incr(key) {
-    return this.client.incr(key);
-  }
+  // ---------------- RAW CLIENT ----------------
 
   getClient() {
     return this.client;

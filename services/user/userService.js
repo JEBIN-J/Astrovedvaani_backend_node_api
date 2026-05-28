@@ -17,6 +17,7 @@ const {
 } = require("../../utils/redis/sessionCacheService");
 const Enums = require("../../utils/constants");
 const AstrologerOfferSchema = require("../../models/AstrologerOfferSchema");
+const redisClient = require("../../utils/redis/redisClient");
 const { ASTROLOGERS_LIST } = CacheService.CACHE_PREFIXES;
 
 const ASTRO_BUSY_PREFIX = "astro:busy:";
@@ -77,13 +78,11 @@ async function getBusyAstrologersMap(astrologerUserIds = []) {
       return new Map();
     }
 
-    const pipeline = redisClient.multi();
+    const keys = astrologerUserIds.map(
+      (id) => `${ASTRO_BUSY_PREFIX}${id}`
+    );
 
-    astrologerUserIds.forEach((id) => {
-      pipeline.get(`${ASTRO_BUSY_PREFIX}${id}`);
-    });
-
-    const results = await pipeline.exec();
+    const results = await redisClient.mGet(keys);
 
     const busyMap = new Map();
 
