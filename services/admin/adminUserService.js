@@ -741,8 +741,19 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
   // =====================================
   // USER ID FILTER
   // =====================================
+  // =====================================
+  // USER ID / ASTROLOGER ID FILTER
+  // =====================================
   if (filters.user_id) {
-    safeFilters.user_id = new mongoose.Types.ObjectId(filters.user_id);
+    const astrologer = await Astrologer.findById(filters.user_id).select(
+      "user_id",
+    );
+
+    if (astrologer) {
+      safeFilters.user_id = astrologer.user_id;
+    } else {
+      safeFilters.user_id = new mongoose.Types.ObjectId(filters.user_id);
+    }
   }
 
   // =====================================
