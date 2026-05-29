@@ -96,7 +96,7 @@ const uploadPDF = async (pdfFullPath) => {
   const form = new FormData();
   form.append("file", fs.createReadStream(pdfFullPath));
   const res = await axios.post(
-    "https://api.astrovedvanni.in/api/file/upload",
+    "https://api.astrovedvaani.com/api/file/upload",
     form,
     { headers: form.getHeaders() },
   );

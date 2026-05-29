@@ -139,14 +139,28 @@ exports.getAllOrders = async ({
     }
   }
 
+  // SEARCH
   if (search) {
+    // find users by name
+    const users = await User.find({
+      name: { $regex: search, $options: "i" },
+    }).select("_id");
+
+    const userIds = users.map((u) => u._id);
+
     match.$or = [
       { remarks: { $regex: search, $options: "i" } },
       { coupon_code: { $regex: search, $options: "i" } },
+
+      {
+        user_id: {
+          $in: userIds,
+        },
+      },
     ];
   }
 
-  // 🚨 Vendor restriction
+  //  Vendor restriction
   let vendorMatch = {};
   if (role === Enums.USER.ROLE.VENDOR) {
     vendorMatch = { "reference_id.created_by": currentUserId };

@@ -18,8 +18,14 @@ const {
 const {
   calculateWalletDeduction,
 } = require("../../../utils/calculateWalletDeduction");
-exports.getProductById = async (id, slug, userId = null) => {
-  logger.info(`Fetching product by ID or Slug: ${(id, slug)}`);
+const Coupon = require("../../../models/Coupan");
+exports.getProductById = async (
+  id,
+  slug,
+  userId = null,
+  coupon_code = null,
+) => {
+  logger.info(`Fetching product by ID or Slug: ${id || slug}`);
 
   let query = {};
 
@@ -37,18 +43,112 @@ exports.getProductById = async (id, slug, userId = null) => {
     .populate("updated_by", "name email")
     .lean();
 
-  if (!product) throw new Error("Product not found");
+  if (!product) {
+    throw new Error("Product not found");
+  }
+
   const uiPrice = Number(product.selling_price || 0);
   const gstPercent = Number(product.gst_percent || 0);
-  product.actualPrice = calculateWalletDeduction(uiPrice, gstPercent);
+
+  // ✅ Original price after GST
+  const actualPrice = calculateWalletDeduction(uiPrice, gstPercent);
+
+  product.actualPrice = Number(actualPrice.toFixed(2));
+
+  // =====================================
+  // APPLY COUPON IF PROVIDED
+  // =====================================
+
+  let couponDiscountAmount = 0;
+
+  product.coupon_discount_amount = 0;
+
+  // Default final price = actual price
+  product.final_price = product.actualPrice;
+
+  product.applied_coupon = null;
+
+  if (coupon_code) {
+    const now = new Date();
+
+    const coupon = await Coupon.findOne({
+      code: coupon_code.toUpperCase(),
+      is_active: true,
+      valid_from: { $lte: now },
+      valid_until: { $gte: now },
+    });
+
+    if (!coupon) {
+      throw new Error("Invalid or expired coupon code");
+    }
+
+    if (
+      coupon.usage_limit !== null &&
+      coupon.used_count >= coupon.usage_limit
+    ) {
+      throw new Error("Coupon usage limit exceeded");
+    }
+
+    if (
+      coupon.minimum_order_amount &&
+      product.actualPrice < coupon.minimum_order_amount
+    ) {
+      throw new Error(
+        `Minimum order amount should be ₹${coupon.minimum_order_amount}`,
+      );
+    }
+
+    // Percentage Discount
+    if (coupon.discount_type === "percentage") {
+      couponDiscountAmount =
+        (product.actualPrice * coupon.discount_value) / 100;
+
+      if (
+        coupon.max_discount_amount &&
+        couponDiscountAmount > coupon.max_discount_amount
+      ) {
+        couponDiscountAmount = coupon.max_discount_amount;
+      }
+    } else {
+      // Flat Discount
+      couponDiscountAmount = coupon.discount_value;
+    }
+
+    couponDiscountAmount = Math.min(couponDiscountAmount, product.actualPrice);
+
+    couponDiscountAmount = Number(couponDiscountAmount.toFixed(2));
+
+    const finalPriceAfterCoupon = Number(
+      (product.actualPrice - couponDiscountAmount).toFixed(2),
+    );
+
+    product.coupon_discount_amount = couponDiscountAmount;
+
+    // ✅ Final amount after coupon
+    product.final_price = finalPriceAfterCoupon;
+
+    product.applied_coupon = {
+      coupon_id: coupon._id,
+      code: coupon.code,
+      discount_type: coupon.discount_type,
+      discount_value: coupon.discount_value,
+      discount_amount: couponDiscountAmount,
+    };
+  }
+
   if (userId) {
     await trackProductView(userId, product._id);
+
     logger.info(`Tracked view for user: ${userId} on product: ${product._id}`);
   }
+
   const [productWithStatus] = await addUserProductStatus([product], userId);
+
   let recommended = [];
+
   if (userId) {
     recommended = await getRecommendations(userId);
+
     logger.info(
       `Fetched ${recommended.length} recommendations for user: ${userId}`,
     );
@@ -59,7 +159,6 @@ exports.getProductById = async (id, slug, userId = null) => {
     recommendations: recommended.slice(0, 6),
   };
 };
-
 exports.searchProducts = async (filters) => {
   const {
     query = "",
