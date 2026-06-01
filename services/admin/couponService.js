@@ -11,6 +11,7 @@ const addCoupon = async (data, adminId) => {
   return savedCoupon;
 };
 const getAllCoupons = async (
+  userId,
   page = 1,
   limit = 10,
   search = "",
@@ -24,12 +25,32 @@ const getAllCoupons = async (
     filter.code = { $regex: search, $options: "i" }; // case-insensitive
   }
 
-  // If flag is true, only return active and not expired coupons
+  // Only active and valid coupons
   if (flag) {
     const now = new Date();
     filter.is_active = true;
     filter.valid_from = { $lte: now };
     filter.valid_until = { $gte: now };
+  }
+  console.log(userId);
+  // Step 1 — Find wallet of user
+  const wallet = await Wallet.findOne({ user_id: userId });
+  if (!wallet) {
+    throw new Error("User wallet not found");
+  }
+
+  // Step 2 — Find coupon codes already used by this user
+  const usedCoupons = await WalletLedger.find({
+    wallet_id: wallet._id,
+    "metadata.coupon_code": { $exists: true },
+    payment_status: Enums.PAYMENT.STATUS.PAID,
+  }).distinct("metadata.coupon_code"); // Get only used coupon codes
+
+  // Step 3 — Exclude already used coupons
+  if (usedCoupons.length > 0) {
+    filter.code = filter.code
+      ? { $regex: search, $options: "i", $nin: usedCoupons }
+      : { $nin: usedCoupons };
   }
 
   const totalDocs = await Coupon.countDocuments(filter);
@@ -40,7 +61,7 @@ const getAllCoupons = async (
     .limit(limit);
 
   logger.info(
-    `Fetched coupons from DB. Page: ${page}, Count: ${coupons.length}, Total: ${totalDocs}, Search: "${search}", ActiveOnly: ${flag}`,
+    `Fetched coupons from DB for user ${userId}. Page: ${page}, Count: ${coupons.length}, Total: ${totalDocs}, Search: "${search}", ActiveOnly: ${flag}`,
   );
 
   return { coupons, totalDocs };

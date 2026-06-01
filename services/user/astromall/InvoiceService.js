@@ -238,4 +238,4 @@ const uploadPDF = async (pdfFullPath) => {
   return res.data.url;
 };
 
-module.exports = { uploadPDF };
+exports.uploadPDF = uploadPDF;

@@ -39,7 +39,9 @@ const buildUTCDateRange = (startDate, endDate) => {
 };
 
 exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
-  const wallet = await Wallet.findOne({ user_id: userId });
+  const wallet = await Wallet.findOne({
+    user_id: userId,
+  });
 
   if (!wallet) {
     return {
@@ -50,15 +52,18 @@ exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
     };
   }
 
-  const query = { wallet_id: wallet._id };
+  const query = {
+    wallet_id: wallet._id,
+  };
 
   // ✅ UTC SAFE DATE FILTER
   const dateRange = buildUTCDateRange(filters.startDate, filters.endDate);
+
   if (dateRange) {
     query.timestamp = dateRange;
   }
 
-  // ✅ SAFE NUMERIC FILTERS (0 supported)
+  // ✅ SAFE NUMERIC FILTERS
   if (filters.transaction_type !== undefined)
     query.transaction_type = Number(filters.transaction_type);
 
@@ -95,22 +100,29 @@ exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
 
     WalletLedger.aggregate([
       { $match: query },
+
       {
         $group: {
           _id: null,
+
           total_credit_amount: {
             $sum: {
               $cond: [
-                { $eq: ["$direction", Enums.TRANSACTION.DIRECTION.CREDIT] },
+                {
+                  $eq: ["$direction", Enums.TRANSACTION.DIRECTION.CREDIT],
+                },
                 "$final_amount",
                 0,
               ],
             },
           },
+
           total_debit_amount: {
             $sum: {
               $cond: [
-                { $eq: ["$direction", Enums.TRANSACTION.DIRECTION.DEBIT] },
+                {
+                  $eq: ["$direction", Enums.TRANSACTION.DIRECTION.DEBIT],
+                },
                 "$final_amount",
                 0,
               ],
@@ -121,10 +133,96 @@ exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
     ]),
   ]);
 
+  // ✅ ONLY ADD USER OBJECT
+  const updatedBookings = await Promise.all(
+    bookings.map(async (item) => {
+      let mobile = null;
+
+      let name = null;
+
+      // =========================
+      // SESSION
+      // =========================
+
+      if (
+        Number(item.related_entity_type) === Number(Enums.ENTITY.TYPE.SESSION)
+      ) {
+        const consultation = await ConsultationSession.findById(
+          item.related_entity_id,
+        )
+          .populate("user_id", "mobileNumber name")
+          .lean();
+
+        mobile = consultation?.user_id?.mobileNumber || null;
+
+        name = consultation?.user_id?.name || null;
+      }
+
+      // =========================
+      // POOJA
+      // =========================
+      else if (
+        Number(item.related_entity_type) === Number(Enums.ENTITY.TYPE.POOJA)
+      ) {
+        const poojaBooking = await PoojaBooking.findById(item.related_entity_id)
+          .populate("user_id", "mobileNumber name")
+          .lean();
+
+        mobile = poojaBooking?.user_id?.mobileNumber || null;
+
+        name = poojaBooking?.user_id?.name || null;
+      }
+
+      // =========================
+      // ORDER
+      // =========================
+      else if (
+        Number(item.related_entity_type) === Number(Enums.ENTITY.TYPE.ORDER)
+      ) {
+        let order = null;
+
+        if (mongoose.Types.ObjectId.isValid(item.related_entity_id)) {
+          order = await Order.findById(item.related_entity_id)
+            .populate("user_id", "mobileNumber name")
+            .lean();
+        }
+
+        mobile = order?.user_id?.mobileNumber || null;
+
+        name = order?.user_id?.name || null;
+      }
+
+      // =========================
+      // FALLBACK
+      // =========================
+      else {
+        const ledgerWallet = await Wallet.findById(item.wallet_id)
+          .populate("user_id", "mobileNumber name")
+          .lean();
+
+        mobile = ledgerWallet?.user_id?.mobileNumber || null;
+
+        name = ledgerWallet?.user_id?.name || null;
+      }
+
+      return {
+        ...item,
+
+        user: {
+          mobile,
+          name,
+        },
+      };
+    }),
+  );
+
   return {
-    bookings,
+    bookings: updatedBookings,
+
     total,
+
     total_credit_amount: totals[0]?.total_credit_amount || 0,
+
     total_debit_amount: totals[0]?.total_debit_amount || 0,
   };
 };

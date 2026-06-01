@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>Invoice <%= invoice.invoice_number %></title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      color: #333;
+      margin: 20px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 2px solid #eee;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+    }
+
+    .header img {
+      width: 120px;
+    }
+
+    .company-details {
+      text-align: right;
+      font-size: 11px;
+    }
+
+    h2 {
+      margin: 5px 0;
+    }
+
+    h3 {
+      margin-top: 25px;
+      margin-bottom: 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th,
+    td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background: #f5f5f5;
+      width: 35%;
+    }
+
+    .footer {
+      margin-top: 30px;
+      text-align: center;
+      font-size: 10px;
+      color: #777;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+
+    <img src="https://api.astrovedvaani.com/uploads/ved.png" />
+
+    <div class="company-details">
+      <strong>Vedvaani</strong><br>
+
+      1137, Bhutani Alphathum,<br>
+
+      Sector 90, Noida, India - 201301<br>
+
+      support@vedvaani.com<br>
+
+      +91 9627865333
+    </div>
+  </div>
+
+  <!-- INVOICE -->
+  <h2>
+    Invoice #<%= invoice.invoice_number %>
+  </h2>
+
+  <p>
+    Date:
+    <%= new Date(invoice.issued_at).toLocaleDateString() %>
+  </p>
+
+  <!-- CUSTOMER DETAILS -->
+  <h3>Customer Details</h3>
+
+  <table>
+    <tr>
+      <th>Name</th>
+
+      <td>
+        <%= user.name || "N/A" %>
+      </td>
+    </tr>
+
+    <tr>
+      <th>Email</th>
+
+      <td>
+        <%= user.email || "N/A" %>
+      </td>
+    </tr>
+
+    <tr>
+      <th>Mobile</th>
+
+      <td>
+        <%= user.mobileNumber || "N/A" %>
+      </td>
+    </tr>
+  </table>
+
+  <!-- POOJA DETAILS -->
+  <h3>Pooja Details</h3>
+
+  <table>
+
+    <tr>
+      <th>Pooja Name</th>
+
+      <td>
+        <%= pooja.name || "N/A" %>
+      </td>
+    </tr>
+
+    <tr>
+      <th>Scheduled Date</th>
+
+      <td>
+        <%= booking.scheduled_at
+          ? new Date(booking.scheduled_at).toLocaleString()
+          : "N/A"
+        %>
+      </td>
+    </tr>
+
+    <!-- STATUS -->
+    <tr>
+      <th>Booking Status</th>
+
+      <td>
+
+        <% 
+          const statusMap = {
+            1400: "PLACED",
+            1401: "PROCESSING",
+            1402: "SHIPPED",
+            1403: "DELIVERED",
+            1404: "CANCELLED",
+            1405: "PENDING",
+            1406: "COMPLETED",
+          };
+        %>
+
+        <%= statusMap[booking.booking_status] || "N/A" %>
+
+      </td>
+    </tr>
+
+    <tr>
+      <th>Special Notes</th>
+
+      <td>
+        <%= booking.special_notes || "N/A" %>
+      </td>
+    </tr>
+
+    <!-- ASTROLOGER -->
+    <tr>
+      <th>Astrologer Name</th>
+
+      <td>
+        <%= booking.astrologer_id?.display_name || "N/A" %>
+      </td>
+    </tr>
+
+    <tr>
+      <th>Astrologer Email</th>
+
+      <td>
+        <%= booking.astrologer_id?.user_id?.email || "N/A" %>
+      </td>
+    </tr>
+
+  
+
+  </table>
+
+  <!-- PRICE DETAILS -->
+  <h3>Price Details</h3>
+
+  <table>
+
+    <tr>
+      <th>Base Price</th>
+
+      <td>
+        ₹<%= invoice.price_snapshot.base_price %>
+      </td>
+    </tr>
+
+    <tr>
+      <th>GST (%)</th>
+
+      <td>
+        <%= invoice.price_snapshot.gst_percent %>%
+      </td>
+    </tr>
+
+    <tr>
+      <th>Discount</th>
+
+      <td>
+        ₹<%= invoice.price_snapshot.discount %>
+      </td>
+    </tr>
+
+    <tr>
+      <th>Final Price</th>
+
+      <td>
+        ₹<%= invoice.price_snapshot.final_price %>
+      </td>
+    </tr>
+
+    <tr>
+      <th>Total Payable</th>
+
+      <td>
+        ₹<%= invoice.price_snapshot.total_payable %>
+      </td>
+    </tr>
+
+  </table>
+
+  <div class="footer">
+    This is a computer generated invoice.
+  </div>
+
+</body>
+
+</html>

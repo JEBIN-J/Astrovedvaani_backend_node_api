@@ -8,6 +8,7 @@ exports.getProduct = async (req, res) => {
       req.query.id,
       req.query.slug,
       req.user?._id,
+      req.query.coupon_code,
     );
     return res.status(200).json({
       success: true,
@@ -109,13 +110,13 @@ exports.searchProducts = async (req, res) => {
       if (Array.isArray(category)) {
         categories = category; // already an array
       } else if (typeof category === "string") {
-        categories = category.split(",").map(c => c.trim());
+        categories = category.split(",").map((c) => c.trim());
       }
     }
 
     const result = await productService.searchProducts({
       query: key?.trim() || "",
-      category: categories,          // <-- pass array or null
+      category: categories, // <-- pass array or null
       minPrice: minPrice ? Number(minPrice) : null,
       maxPrice: maxPrice ? Number(maxPrice) : null,
       sortRating: sortRating || null,
@@ -137,7 +138,6 @@ exports.searchProducts = async (req, res) => {
     });
   }
 };
-
 
 exports.getFeaturedProducts = async (req, res) => {
   try {

@@ -8,7 +8,9 @@ const logger = require("../../utils/logger");
 exports.getChatList = async (userId, page = 1, limit = 20) => {
   const skip = (page - 1) * limit;
   const userObjectId = new mongoose.Types.ObjectId(userId);
-  logger.info(`[CHAT LIST] Fetching chat list for userId: ${userId}, page: ${page}, limit: ${limit}`);
+  logger.info(
+    `[CHAT LIST] Fetching chat list for userId: ${userId}, page: ${page}, limit: ${limit}`,
+  );
   const chats = await ChatMessage.aggregate([
     {
       $match: {
@@ -56,7 +58,7 @@ exports.getChatList = async (userId, page = 1, limit = 20) => {
   const partnerIds = chats.map((c) => c._id);
   logger.info(`[CHAT LIST] Partner IDs: ${partnerIds.join(", ")}`);
   const users = await User.find({ _id: { $in: partnerIds } }).select(
-    "name profilePicture lastLogin"
+    "name profilePicture lastLogin",
   );
 
   const astrologers = await Astrologer.find({
@@ -67,7 +69,7 @@ exports.getChatList = async (userId, page = 1, limit = 20) => {
 
   const chatList = chats.map((chat) => {
     const astro = astrologers.find(
-      (a) => a.user_id._id.toString() === chat._id.toString()
+      (a) => a.user_id._id.toString() === chat._id.toString(),
     );
     if (astro) {
       return {
@@ -102,12 +104,25 @@ exports.getChatList = async (userId, page = 1, limit = 20) => {
   };
 };
 
-exports.getConversation = async (loginUserId, otherUserId,sessionId , page = 1, limit = 20) => {
+exports.getConversation = async (
+  loginUserId,
+  otherUserId,
+  sessionId,
+  page = 1,
+  limit = 20,
+) => {
   const skip = (page - 1) * limit;
-  logger.info(`[CONVERSATION] Fetching conversation between loginUserId: ${loginUserId} and otherUserId: ${otherUserId}, page: ${page}, limit: ${limit}`);
-  if (!mongoose.Types.ObjectId.isValid(loginUserId) || !mongoose.Types.ObjectId.isValid(otherUserId)) {
-    logger.warn(`[CONVERSATION] Invalid user ID(s) provided: loginUserId=${loginUserId}, otherUserId=${otherUserId}`);
-    throw new Error('Invalid user ID(s)');
+  logger.info(
+    `[CONVERSATION] Fetching conversation between loginUserId: ${loginUserId} and otherUserId: ${otherUserId}, page: ${page}, limit: ${limit}`,
+  );
+  if (
+    !mongoose.Types.ObjectId.isValid(loginUserId) ||
+    !mongoose.Types.ObjectId.isValid(otherUserId)
+  ) {
+    logger.warn(
+      `[CONVERSATION] Invalid user ID(s) provided: loginUserId=${loginUserId}, otherUserId=${otherUserId}`,
+    );
+    throw new Error("Invalid user ID(s)");
   }
   const loginUserObjectId = new mongoose.Types.ObjectId(loginUserId);
   const otherUserObjectId = new mongoose.Types.ObjectId(otherUserId);
@@ -117,9 +132,9 @@ exports.getConversation = async (loginUserId, otherUserId,sessionId , page = 1, 
       { sender_id: otherUserObjectId, receiver_id: loginUserObjectId },
     ],
   };
-   if (sessionId) {
+  if (sessionId) {
     if (!mongoose.Types.ObjectId.isValid(sessionId)) {
-      throw new Error('Invalid session ID');
+      throw new Error("Invalid session ID");
     }
     query.session_id = new mongoose.Types.ObjectId(sessionId);
   }
@@ -127,12 +142,14 @@ exports.getConversation = async (loginUserId, otherUserId,sessionId , page = 1, 
   logger.info(`[CONVERSATION] MongoDB query: ${JSON.stringify(query)}`);
   const totalDocs = await ChatMessage.countDocuments(query);
   const messages = await ChatMessage.find(query)
-    .sort({ createdAt: -1 })
+    .sort({ createdAt: 1 })
     .skip(skip)
     .limit(limit)
-    .populate('sender_id', 'name profilePicture role')
-    .populate('receiver_id', 'name profilePicture role');
-  logger.info(`[CONVERSATION] Fetched ${messages.length} messages out of ${totalDocs} total`);
+    .populate("sender_id", "name profilePicture role")
+    .populate("receiver_id", "name profilePicture role");
+  logger.info(
+    `[CONVERSATION] Fetched ${messages.length} messages out of ${totalDocs} total`,
+  );
   return {
     messages,
     pagination: buildPaginationResponse({

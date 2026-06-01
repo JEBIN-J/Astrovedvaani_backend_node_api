@@ -717,15 +717,8 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     exportCsv = false,
   } = options;
 
-  // =====================================
-  // SAFE FILTERS
-  // =====================================
   const safeFilters = {};
 
-  // =====================================
-  // MONTH-YEAR FILTER
-  // FORMAT => 05-2026
-  // =====================================
   if (filters.monthYear) {
     const [month, year] = filters.monthYear.split("-");
 
@@ -738,28 +731,24 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     }
   }
 
-  // =====================================
-  // USER ID FILTER
-  // =====================================
   if (filters.user_id) {
-    safeFilters.user_id = new mongoose.Types.ObjectId(filters.user_id);
+    const astrologer = await Astrologer.findById(filters.user_id).select(
+      "user_id",
+    );
+
+    if (astrologer) {
+      safeFilters.user_id = astrologer.user_id;
+    } else {
+      safeFilters.user_id = filters.user_id;
+    }
   }
 
-  // =====================================
-  // PIPELINE
-  // =====================================
   const pipeline = [];
 
-  // =====================================
-  // MATCH
-  // =====================================
   pipeline.push({
     $match: safeFilters,
   });
 
-  // =====================================
-  // USER LOOKUP
-  // =====================================
   pipeline.push({
     $lookup: {
       from: "users",
@@ -772,9 +761,6 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     },
   });
 
-  // =====================================
-  // UNWIND
-  // =====================================
   pipeline.push({
     $unwind: {
       path: "$user",
@@ -783,9 +769,6 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     },
   });
 
-  // =====================================
-  // SEARCH
-  // =====================================
   if (searchTerm) {
     const s = searchTerm.trim();
 
@@ -817,23 +800,14 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     });
   }
 
-  // =====================================
-  // SORT
-  // =====================================
   pipeline.push({
     $sort: {
       [sortBy]: sortOrder === "asc" ? 1 : -1,
     },
   });
 
-  // =====================================
-  // COUNT PIPELINE
-  // =====================================
   const countPipeline = JSON.parse(JSON.stringify(pipeline));
 
-  // =====================================
-  // PAGINATION
-  // =====================================
   if (exportCsv !== true) {
     pipeline.push({
       $skip: (Number(page) - 1) * Number(limit),
@@ -844,9 +818,6 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     });
   }
 
-  // =====================================
-  // PROJECT
-  // =====================================
   pipeline.push({
     $project: {
       slip_number: 1,
@@ -893,14 +864,8 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     },
   });
 
-  // =====================================
-  // EXECUTE
-  // =====================================
   const salarySlips = await SalarySlip.aggregate(pipeline);
 
-  // =====================================
-  // TOTAL COUNT
-  // =====================================
   let totalCount = 0;
 
   if (exportCsv === true) {
@@ -915,9 +880,6 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
     totalCount = countResult?.[0]?.total || 0;
   }
 
-  // =====================================
-  // PAGINATION RESPONSE
-  // =====================================
   const pagination =
     exportCsv === true
       ? undefined
@@ -931,9 +893,6 @@ const fetchSalarySlips = async (filters = {}, options = {}) => {
           limit: Number(limit),
         };
 
-  // =====================================
-  // RETURN
-  // =====================================
   return {
     data: salarySlips,
 

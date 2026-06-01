@@ -26,6 +26,7 @@ const Wallet = require("../../../models/Wallet");
 const Order = require("../../../models/Order");
 const { emitWalletUpdate } = require("../../socket/walletNotification");
 const { BadRequestError } = require("../../../errors");
+const Invoice = require("../../../models/Invoice");
 
 function normalizePoojaPricing({ selling_price, discount, gstRate }) {
   selling_price = Number(selling_price || 0);
@@ -167,15 +168,25 @@ exports.getAllBookings = async ({
   pooja_end_date,
 }) => {
   const skip = (page - 1) * limit;
+
   const match = {};
 
-  // ✅ Filters
-  if (booking_status) match.booking_status = parseInt(booking_status);
-  if (payment_status) match.payment_status = parseInt(payment_status);
+  // Filters
+  if (booking_status) {
+    match.booking_status = parseInt(booking_status);
+  }
 
-  if (user_id) match.user_id = new mongoose.Types.ObjectId(user_id);
-  if (astrologer_id)
+  if (payment_status) {
+    match.payment_status = parseInt(payment_status);
+  }
+
+  if (user_id) {
+    match.user_id = new mongoose.Types.ObjectId(user_id);
+  }
+
+  if (astrologer_id) {
     match.astrologer_id = new mongoose.Types.ObjectId(astrologer_id);
+  }
 
   if (is_astrologer_assigned === "true") {
     match.astrologer_id = { $ne: null };
@@ -183,39 +194,66 @@ exports.getAllBookings = async ({
     match.astrologer_id = null;
   }
 
-  // ✅ Date filters
   if (booking_start_date || booking_end_date) {
     match.scheduled_at = {};
+
     if (booking_start_date) {
       const start = new Date(booking_start_date);
+
       start.setHours(0, 0, 0, 0);
+
       match.scheduled_at.$gte = start;
     }
+
     if (booking_end_date) {
       const end = new Date(booking_end_date);
+
       end.setHours(23, 59, 59, 999);
+
       match.scheduled_at.$lte = end;
     }
   }
 
   if (pooja_start_date || pooja_end_date) {
     match.createdAt = {};
+
     if (pooja_start_date) {
       const start = new Date(pooja_start_date);
+
       start.setHours(0, 0, 0, 0);
+
       match.createdAt.$gte = start;
     }
+
     if (pooja_end_date) {
       const end = new Date(pooja_end_date);
+
       end.setHours(23, 59, 59, 999);
+
       match.createdAt.$lte = end;
     }
   }
 
+  const assignedMatch = {
+    ...match,
+    astrologer_id: { $ne: null },
+  };
+
+  const unassignedMatch = {
+    ...match,
+    astrologer_id: null,
+  };
+
+  const [assignedCount, unassignedCount] = await Promise.all([
+    PoojaBooking.countDocuments(assignedMatch),
+
+    PoojaBooking.countDocuments(unassignedMatch),
+  ]);
+
   const pipeline = [
     { $match: match },
 
-    // ✅ USER
+    // USER
     {
       $lookup: {
         from: "users",
@@ -224,9 +262,10 @@ exports.getAllBookings = async ({
         as: "user",
       },
     },
+
     { $unwind: "$user" },
 
-    // ✅ POOJA
+    // POOJA
     {
       $lookup: {
         from: "poojamasters",
@@ -235,9 +274,10 @@ exports.getAllBookings = async ({
         as: "pooja",
       },
     },
+
     { $unwind: "$pooja" },
 
-    // ✅ ASTROLOGER
+    // ASTROLOGER
     {
       $lookup: {
         from: "astrologers",
@@ -246,6 +286,7 @@ exports.getAllBookings = async ({
         as: "astrologer",
       },
     },
+
     {
       $unwind: {
         path: "$astrologer",
@@ -253,7 +294,7 @@ exports.getAllBookings = async ({
       },
     },
 
-    // ✅ SPECIALIZATIONS
+    // SPECIALIZATIONS
     {
       $lookup: {
         from: "specializations",
@@ -263,7 +304,7 @@ exports.getAllBookings = async ({
       },
     },
 
-    // ✅ LANGUAGES SPOKEN (NEW 🔥)
+    // LANGUAGES
     {
       $lookup: {
         from: "languages",
@@ -273,7 +314,7 @@ exports.getAllBookings = async ({
       },
     },
 
-    // ✅ ASTROLOGER MOBILE NUMBER
+    // ASTRO USER
     {
       $lookup: {
         from: "users",
@@ -282,6 +323,7 @@ exports.getAllBookings = async ({
         as: "astroUser",
       },
     },
+
     {
       $unwind: {
         path: "$astroUser",
@@ -289,28 +331,94 @@ exports.getAllBookings = async ({
       },
     },
 
-    // ✅ Merge mobile into astrologer
+    // MERGE MOBILE
     {
       $addFields: {
         "astrologer.mobileNumber": "$astroUser.mobileNumber",
       },
     },
 
-    // ❌ Remove extra
+    {
+      $lookup: {
+        from: "orders",
+        localField: "_id",
+        foreignField: "reference_id",
+        as: "order",
+      },
+    },
+
+    {
+      $unwind: {
+        path: "$order",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+
+    //  INVOICE
+    {
+      $lookup: {
+        from: "invoices",
+        localField: "order._id",
+        foreignField: "order_id",
+        as: "invoice",
+      },
+    },
+
+    {
+      $unwind: {
+        path: "$invoice",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+
+    {
+      $addFields: {
+        invoice: {
+          $cond: [
+            { $ifNull: ["$invoice._id", false] },
+
+            {
+              _id: "$invoice._id",
+
+              invoice_number: "$invoice.invoice_number",
+
+              order_id: "$invoice.order_id",
+
+              invoiceUrl: "$invoice.invoiceUrl",
+            },
+
+            null,
+          ],
+        },
+      },
+    },
+
     {
       $project: {
         astroUser: 0,
       },
     },
 
-    // ✅ SEARCH
+    // SEARCH
     ...(search
       ? [
           {
             $match: {
               $or: [
-                { "user.name": { $regex: search, $options: "i" } },
-                { "pooja.name": { $regex: search, $options: "i" } },
+                {
+                  "user.name": {
+                    $regex: search,
+                    $options: "i",
+                  },
+                },
+
+                {
+                  "pooja.name": {
+                    $regex: search,
+                    $options: "i",
+                  },
+                },
+
                 {
                   "astrologer.display_name": {
                     $regex: search,
@@ -323,13 +431,18 @@ exports.getAllBookings = async ({
         ]
       : []),
 
-    // ✅ SORT
-    { $sort: { createdAt: -1 } },
+    // SORT
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
 
-    // ✅ PAGINATION
+    // PAGINATION
     {
       $facet: {
         bookings: [{ $skip: skip }, { $limit: limit }],
+
         totalDocs: [{ $count: "count" }],
       },
     },
@@ -338,13 +451,22 @@ exports.getAllBookings = async ({
   const result = await PoojaBooking.aggregate(pipeline);
 
   const bookings = result[0]?.bookings || [];
+
   const totalDocs = result[0]?.totalDocs[0]?.count || 0;
 
   return {
     bookings,
+
     totalDocs,
+
+    assignedCount,
+
+    unassignedCount,
+
     totalPages: Math.ceil(totalDocs / limit),
+
     page,
+
     limit,
   };
 };
@@ -441,16 +563,19 @@ function getStatusKey(object, value) {
 const updatePoojaStatus = {
   [Enums.ORDER.STATUS.PENDING]: [
     Enums.ORDER.STATUS.PLACED,
+    Enums.ORDER.STATUS.COMPLETED,
     Enums.ORDER.STATUS.CANCELLED,
   ],
+
   [Enums.ORDER.STATUS.PLACED]: [
     Enums.ORDER.STATUS.COMPLETED,
     Enums.ORDER.STATUS.CANCELLED,
   ],
+
   [Enums.ORDER.STATUS.CANCELLED]: [],
+
   [Enums.ORDER.STATUS.COMPLETED]: [],
 };
-
 exports.updateBookingStatus = async ({
   booking_id,
   booking_status,
@@ -629,59 +754,280 @@ exports.updateBookingStatus = async ({
       // =========================================================
       // COMPLETED → PAY ASTROLOGER
       // =========================================================
-      else if (booking_status === Enums.ORDER.STATUS.COMPLETED) {
-        const astrologer = booking.astrologer_id;
-        if (!astrologer?.user_id) return;
+      const updatePoojaStatus = {
+        [Enums.ORDER.STATUS.PENDING]: [
+          Enums.ORDER.STATUS.PLACED,
+          Enums.ORDER.STATUS.COMPLETED,
+          Enums.ORDER.STATUS.CANCELLED,
+        ],
+        [Enums.ORDER.STATUS.PLACED]: [
+          Enums.ORDER.STATUS.COMPLETED,
+          Enums.ORDER.STATUS.CANCELLED,
+        ],
+        [Enums.ORDER.STATUS.CANCELLED]: [],
+        [Enums.ORDER.STATUS.COMPLETED]: [],
+      };
 
-        const astroUserId = astrologer.user_id._id || astrologer.user_id;
-        const astrologerWallet = await Wallet.findOne({
-          user_id: astroUserId,
+      exports.updateBookingStatus = async ({
+        booking_id,
+        booking_status,
+        admin_remarks,
+        scheduled_at,
+        admin_user_id = null,
+      }) => {
+        logger.info("[updateBookingStatus] Start", {
+          booking_id,
+          booking_status,
         });
 
-        if (!astrologerWallet) return;
+        if (!mongoose.Types.ObjectId.isValid(booking_id)) {
+          throw new Error("Invalid booking ID.");
+        }
 
-        const commission = booking.astrologer_share_amount ?? 0;
-        if (commission <= 0) return;
+        const booking = await PoojaBooking.findById(booking_id)
+          .populate({
+            path: "astrologer_id",
+            populate: { path: "user_id" },
+          })
+          .populate("user_id")
+          .populate("pooja_id", "name");
 
-        const adminOpeningBalance = adminWallet.balance;
-        const astroOpeningBalance = astrologerWallet.balance;
+        if (!booking) throw new Error("Booking not found.");
 
-        adminWallet.balance = Number(
-          (adminWallet.balance - commission).toFixed(2),
-        );
-        astrologerWallet.balance = Number(
-          (astrologerWallet.balance + commission).toFixed(2),
-        );
+        let currentStatus = booking.booking_status;
 
-        await Promise.all([adminWallet.save(), astrologerWallet.save()]);
+        // ================= STATUS TRANSITION VALIDATION =================
+        if (booking_status !== undefined) {
+          if (
+            currentStatus === Enums.ORDER.STATUS.COMPLETED ||
+            currentStatus === Enums.ORDER.STATUS.CANCELLED
+          ) {
+            currentStatus =
+              getStatusKey(Enums.ORDER.STATUS, currentStatus) || currentStatus;
+            throw new Error(
+              `Booking already ${currentStatus}. Status cannot be changed.`,
+            );
+          }
 
-        await WalletLedger.create([
-          {
-            wallet_id: adminWallet._id,
-            user_id: adminUserId,
-            transaction_type: Enums.TRANSACTION.TYPE.POOJA,
-            direction: Enums.TRANSACTION.DIRECTION.DEBIT,
-            opening_balance: adminOpeningBalance,
-            amount: commission,
-            final_amount: commission,
-            closing_balance: adminWallet.balance,
-            remarks: `Commission payout for booking ${booking._id}`,
-            timestamp,
-          },
-          {
-            wallet_id: astrologerWallet._id,
-            user_id: astroUserId,
-            transaction_type: Enums.TRANSACTION.TYPE.POOJA_COMMISSION,
-            direction: Enums.TRANSACTION.DIRECTION.CREDIT,
-            opening_balance: astroOpeningBalance,
-            amount: commission,
-            final_amount: commission,
-            closing_balance: astrologerWallet.balance,
-            remarks: `Commission received for booking ${booking._id}`,
-            timestamp,
-          },
-        ]);
-      }
+          const allowedTransitions = updatePoojaStatus[currentStatus] || [];
+
+          if (!allowedTransitions.includes(booking_status)) {
+            currentStatus =
+              getStatusKey(Enums.ORDER.STATUS, currentStatus) || currentStatus;
+            let attemptedStatus =
+              getStatusKey(Enums.ORDER.STATUS, booking_status) ||
+              booking_status;
+            throw new Error(
+              `Invalid status transition from ${currentStatus} to ${attemptedStatus}`,
+            );
+          }
+
+          booking.booking_status = booking_status;
+        }
+
+        if (admin_remarks !== undefined) {
+          booking.admin_remarks = admin_remarks;
+        }
+
+        if (scheduled_at !== undefined) {
+          const date = new Date(scheduled_at);
+          if (isNaN(date.getTime())) {
+            throw new Error("Invalid scheduled_at datetime.");
+          }
+          booking.scheduled_at = date;
+        }
+
+        // ===== STORE ASTROLOGER BEFORE CANCELLATION (important) =====
+        const assignedAstrologer = booking.astrologer_id;
+
+        // ================= CANCEL LOGIC =================
+        if (booking_status === Enums.ORDER.STATUS.CANCELLED) {
+          // If astrologer was assigned (PLACED case)
+          if (
+            currentStatus === Enums.ORDER.STATUS.PLACED &&
+            assignedAstrologer
+          ) {
+            booking.astrologer_id = null;
+            booking.commission_pct = 0;
+            booking.astrologer_share_amount = 0;
+          }
+          booking.payment_status = Enums.PAYMENT.STATUS.REFUNDED;
+        }
+
+        await booking.save();
+
+        // ================= UPDATE ORDER =================
+        const order = await Order.findOne({
+          order_type: Enums.ORDER.TYPE.POOJA,
+          reference_id: booking._id,
+        });
+
+        if (order && booking_status !== undefined) {
+          order.tracking_status = booking.booking_status;
+          await order.save();
+        }
+
+        // ================= BACKGROUND OPERATIONS =================
+        process.nextTick(async () => {
+          try {
+            const adminUserId = admin_user_id || (await getAdminUserId());
+            const adminWallet = await Wallet.findOne({ user_id: adminUserId });
+            if (!adminWallet) return;
+
+            const bookingUserId = booking.user_id?._id || booking.user_id;
+            const userWallet = await Wallet.findOne({ user_id: bookingUserId });
+
+            const amount = booking.price_snapshot?.final_price ?? 0;
+            const timestamp = new Date();
+
+            // =========================================================
+            // CANCELLED → REFUND USER
+            // =========================================================
+            if (booking_status === Enums.ORDER.STATUS.CANCELLED) {
+              if (!userWallet || amount <= 0) return;
+
+              const adminOpeningBalance = adminWallet.balance;
+              const userOpeningBalance = userWallet.balance;
+
+              adminWallet.balance = Number(
+                (adminWallet.balance - amount).toFixed(2),
+              );
+              userWallet.balance = Number(
+                (userWallet.balance + amount).toFixed(2),
+              );
+
+              await Promise.all([adminWallet.save(), userWallet.save()]);
+
+              await WalletLedger.create([
+                {
+                  wallet_id: adminWallet._id,
+                  user_id: adminUserId,
+                  transaction_type: Enums.TRANSACTION.TYPE.POOJA,
+                  direction: Enums.TRANSACTION.DIRECTION.DEBIT,
+                  opening_balance: adminOpeningBalance,
+                  payment_status: Enums.PAYMENT.STATUS.REFUNDED,
+                  amount,
+                  final_amount: amount,
+                  closing_balance: adminWallet.balance,
+                  remarks: `Refund for cancelled booking ${booking._id}`,
+                  timestamp,
+                },
+                {
+                  wallet_id: userWallet._id,
+                  user_id: bookingUserId,
+                  transaction_type: Enums.TRANSACTION.TYPE.POOJA,
+                  direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+                  opening_balance: userOpeningBalance,
+                  payment_status: Enums.PAYMENT.STATUS.REFUNDED,
+                  amount,
+                  final_amount: amount,
+                  closing_balance: userWallet.balance,
+                  remarks: `Refund received for cancelled booking ${booking._id}`,
+                  timestamp,
+                },
+              ]);
+
+              // ================= Notify astrologer if PLACED =================
+              if (
+                currentStatus === Enums.ORDER.STATUS.PLACED &&
+                assignedAstrologer
+              ) {
+                const astro =
+                  await Astrologer.findById(assignedAstrologer).populate(
+                    "user_id",
+                  );
+
+                if (astro?.user_id) {
+                  await notifyAstrologerPoojaCancelled({
+                    astrologerUserId: astro.user_id,
+                    poojaName: booking.pooja_id?.name || "Pooja",
+                    scheduledAt: booking.scheduled_at,
+                  });
+                }
+              }
+
+              emitWalletUpdate(
+                bookingUserId,
+                amount,
+                userOpeningBalance,
+                userWallet.balance,
+                "success",
+                "booking",
+              );
+            }
+
+            // =========================================================
+            // COMPLETED → PAY ASTROLOGER
+            // =========================================================
+            else if (booking_status === Enums.ORDER.STATUS.COMPLETED) {
+              const astrologer = booking.astrologer_id;
+              if (!astrologer?.user_id) return;
+
+              const astroUserId = astrologer.user_id._id || astrologer.user_id;
+              const astrologerWallet = await Wallet.findOne({
+                user_id: astroUserId,
+              });
+
+              if (!astrologerWallet) return;
+
+              const commission = booking.astrologer_share_amount ?? 0;
+              if (commission <= 0) return;
+
+              const adminOpeningBalance = adminWallet.balance;
+              const astroOpeningBalance = astrologerWallet.balance;
+
+              adminWallet.balance = Number(
+                (adminWallet.balance - commission).toFixed(2),
+              );
+              astrologerWallet.balance = Number(
+                (astrologerWallet.balance + commission).toFixed(2),
+              );
+
+              await Promise.all([adminWallet.save(), astrologerWallet.save()]);
+
+              await WalletLedger.create([
+                {
+                  wallet_id: adminWallet._id,
+                  user_id: adminUserId,
+                  transaction_type: Enums.TRANSACTION.TYPE.POOJA,
+                  direction: Enums.TRANSACTION.DIRECTION.DEBIT,
+                  opening_balance: adminOpeningBalance,
+                  amount: commission,
+                  final_amount: commission,
+                  closing_balance: adminWallet.balance,
+                  remarks: `Commission payout for booking ${booking._id}`,
+                  timestamp,
+                },
+                {
+                  wallet_id: astrologerWallet._id,
+                  user_id: astroUserId,
+                  transaction_type: Enums.TRANSACTION.TYPE.POOJA_COMMISSION,
+                  direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+                  opening_balance: astroOpeningBalance,
+                  amount: commission,
+                  final_amount: commission,
+                  closing_balance: astrologerWallet.balance,
+                  remarks: `Commission received for booking ${booking._id}`,
+                  timestamp,
+                },
+              ]);
+            }
+
+            await emitBookingStatusUpdate({
+              bookingId: booking._id,
+              userId: bookingUserId,
+              astrologerUserId: assignedAstrologer,
+              status: booking.booking_status,
+              scheduledAt: booking.scheduled_at,
+              adminUserId,
+            });
+          } catch (err) {
+            logger.error("[updateBookingStatus-bg] Error", err);
+          }
+        });
+
+        return booking;
+      };
 
       await emitBookingStatusUpdate({
         bookingId: booking._id,

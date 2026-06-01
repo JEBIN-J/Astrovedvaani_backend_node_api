@@ -29,6 +29,7 @@ function calculateWalletDeduction(uiPrice, productGst) {
 }
 exports.placeOrder = async (userId, orderData) => {
   logger.info(`[ORDER] placeOrder called by user: ${userId}`);
+
   const {
     product_id,
     quantity = 1,
@@ -37,86 +38,148 @@ exports.placeOrder = async (userId, orderData) => {
     coupon_code,
     order_type = null,
   } = orderData;
+
   const product = await Product.findById(product_id);
+
   if (!product || !product.is_active) {
     throw new NotFoundError("Invalid or inactive product");
   }
+
   const selling_price = Number(product.selling_price);
   const base_price = Number(product.base_price);
-  const gst_percent = Number(product.gst_percent);
-  const discount = Number(product.discount);
-  let ui_final_price = selling_price;
+  const gst_percent = Number(product.gst_percent || 0);
+  const discount = Number(product.discount || 0);
+
+  // =====================================
+  // PRODUCT TOTAL
+  // =====================================
+  const totalUiPrice = Number((selling_price * quantity).toFixed(2));
+
   let couponDiscountAmount = 0;
+  let appliedCoupon = null;
+
   if (coupon_code) {
     const now = new Date();
+
     const coupon = await Coupon.findOne({
       code: coupon_code.toUpperCase(),
       is_active: true,
       valid_from: { $lte: now },
       valid_until: { $gte: now },
     });
+
     if (!coupon) {
       throw new ValidationError("Invalid or expired coupon code");
     }
+
     if (
       coupon.usage_limit !== null &&
       coupon.used_count >= coupon.usage_limit
     ) {
       throw new ValidationError("Coupon usage limit exceeded");
     }
-    if (ui_final_price < coupon.min_cart_value) {
+
+    if (
+      coupon.minimum_order_amount &&
+      totalUiPrice < coupon.minimum_order_amount
+    ) {
       throw new ValidationError(
-        `Cart value must be at least ₹${coupon.min_cart_value}`,
+        `Minimum order amount should be ₹${coupon.minimum_order_amount}`,
       );
     }
+
+    // Percentage Discount
     if (coupon.discount_type === "percentage") {
-      couponDiscountAmount = (ui_final_price * coupon.discount_value) / 100;
+      couponDiscountAmount = (totalUiPrice * coupon.discount_value) / 100;
+
+      if (
+        coupon.max_discount_amount &&
+        couponDiscountAmount > coupon.max_discount_amount
+      ) {
+        couponDiscountAmount = coupon.max_discount_amount;
+      }
     } else {
+      // Flat Discount
       couponDiscountAmount = coupon.discount_value;
     }
-    couponDiscountAmount = Math.min(couponDiscountAmount, ui_final_price);
+
+    couponDiscountAmount = Math.min(couponDiscountAmount, totalUiPrice);
+
     couponDiscountAmount = Number(couponDiscountAmount.toFixed(2));
-    ui_final_price = Number((ui_final_price - couponDiscountAmount).toFixed(2));
+
+    appliedCoupon = coupon._id;
   }
-  const wallet_deduction_per_unit = calculateWalletDeduction(
-    ui_final_price,
-    gst_percent,
+
+  const finalAmount = Number((totalUiPrice - couponDiscountAmount).toFixed(2));
+
+  const wallet_deduction = Number(
+    calculateWalletDeduction(finalAmount, gst_percent).toFixed(2),
   );
-  const total_wallet_deduction = Number(
-    (wallet_deduction_per_unit * quantity).toFixed(2),
-  );
+
   const balance = await getWalletBalance(userId);
-  if (balance < total_wallet_deduction) {
+
+  if (balance < wallet_deduction) {
     throw new InsufficientBalanceError(
-      `Insufficient wallet balance. Required: ₹${total_wallet_deduction}, Available: ₹${balance}`,
+      `Insufficient wallet balance. Required: ₹${wallet_deduction}, Available: ₹${balance}`,
     );
   }
+
   const order = new Order({
     user_id: userId,
+
     order_type,
+
     reference_id: product._id,
+
     quantity,
+
     price_snapshot: {
       selling_price,
       base_price,
       gst_percent,
       discount,
-      final_price: Number((ui_final_price + couponDiscountAmount).toFixed(2)),
+      final_price: selling_price,
     },
+
+    coupon_id: appliedCoupon,
+
     coupon_code: coupon_code ? coupon_code.toUpperCase() : null,
+
+    coupon_discount_amount: couponDiscountAmount,
+
+    subtotal_amount: totalUiPrice,
+
+    final_amount: finalAmount,
+
     delivery_charge: 0,
-    total_payable: total_wallet_deduction,
-    paid_amount: total_wallet_deduction,
+
+    total_payable: wallet_deduction,
+
+    paid_amount: wallet_deduction,
+
     payment_method,
+
     shipping_address: shippingAddressId,
   });
+
   await order.save();
+
+  // =====================================
+  // UPDATE COUPON USAGE
+  // =====================================
   if (coupon_code) {
     await Coupon.updateOne(
-      { code: coupon_code.toUpperCase() },
-      { $inc: { used_count: 1 } },
+      {
+        code: coupon_code.toUpperCase(),
+      },
+      {
+        $inc: {
+          used_count: 1,
+        },
+      },
     );
   }
+
   return order;
 };
 exports.updateOrder = async (userId, orderId, updateData) => {

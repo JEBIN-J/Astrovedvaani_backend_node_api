@@ -12,8 +12,8 @@ exports.getUserLedger = async (req, res, next) => {
     const limit = parseInt(req.query.limit, 10) || 10;
 
     const filters = {
-      startDate: req.query.startDate,
-      endDate: req.query.endDate,
+      startDate: req.query.start_date,
+      endDate: req.query.end_date,
       transaction_type: req.query.transaction_type,
       direction: req.query.direction,
       payment_status: req.query.payment_status,
