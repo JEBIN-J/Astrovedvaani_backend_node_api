@@ -9,6 +9,8 @@ const { NotFoundError, BadRequestError } = require("../../../errors");
 const ChatMessage = require("../../../models/Chat");
 const Astrologer = require("../../../models/Astrologer");
 const Wallet = require("../../../models/Wallet");
+const Feedback = require("../../../models/Feedback");
+const AstrologerServiceRates = require("../../../models/AstrologerServiceRates");
 function sanitizeUser(user) {
   if (!user) return null;
 
@@ -59,14 +61,17 @@ exports.getConsultationSessions = async (filters) => {
     page = 1,
     limit = 10,
     search,
-    mode
+    mode,
   } = filters;
+
+  console.log("limits received:", { page, limit });
 
   const query = {};
 
   // =========================================
   // SEARCH FILTER
   // =========================================
+
   if (search) {
     const users = await User.find({
       mobileNumber: {
@@ -75,27 +80,19 @@ exports.getConsultationSessions = async (filters) => {
       },
     }).select("_id");
 
-    const userIds = users.map((u) => u._id);
-
-    query.user_id = { $in: userIds };
+    query.user_id = {
+      $in: users.map((u) => u._id),
+    };
   }
 
-    if (mode) {
-      const modeValue = Number(mode);
-      console.log("modeValue", modeValue);
-    query.mode = modeValue;
+  if (mode) {
+    query.mode = Number(mode);
   }
 
-  // =========================================
-  // USER FILTER
-  // =========================================
   if (user_id && mongoose.Types.ObjectId.isValid(user_id)) {
     query.user_id = user_id;
   }
 
-  // =========================================
-  // ASTROLOGER USER FILTER
-  // =========================================
   if (
     astrologer_user_id &&
     mongoose.Types.ObjectId.isValid(astrologer_user_id)
@@ -103,7 +100,10 @@ exports.getConsultationSessions = async (filters) => {
     query.astrologer_user_id = astrologer_user_id;
   }
 
-  if (astrologer_id && mongoose.Types.ObjectId.isValid(astrologer_id)) {
+  if (
+    astrologer_id &&
+    mongoose.Types.ObjectId.isValid(astrologer_id)
+  ) {
     query.astrologer_id = astrologer_id;
   }
 
@@ -125,26 +125,60 @@ exports.getConsultationSessions = async (filters) => {
     query.createdAt = dateFilter;
   }
 
-  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const skip =
+    (parseInt(page) - 1) * parseInt(limit);
 
-  const [rawSessions, totalDocs] = await Promise.all([
+  // =========================================
+  // COUNTS + SESSIONS PARALLEL
+  // =========================================
+
+  const [
+    rawSessions,
+    totalDocs,
+    attempted_sessions_count,
+    non_attempted_sessions_count,
+  ] = await Promise.all([
     ConsultationSession.find(query)
-      .populate({ path: "user_id" })
-      .populate({ path: "astrologer_id" })
+      .populate("user_id")
+      .populate("astrologer_id")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(Number(limit))
       .lean(),
 
     ConsultationSession.countDocuments(query),
+
+    ConsultationSession.countDocuments({
+      ...query,
+      status: Enums.SERVICE.STATUS.COMPLETED,
+    }),
+
+    ConsultationSession.countDocuments({
+      ...query,
+      status: {
+        $in: [
+          Enums.SERVICE.STATUS.CANCELLED,
+          Enums.SERVICE.STATUS.NO_SHOW,
+        ],
+      },
+    }),
   ]);
 
-  console.log("rawSessions", rawSessions);
+
+  const total_sessions_count =
+    attempted_sessions_count +
+    non_attempted_sessions_count;
+
+
+  // =========================================
+  // EARNING QUERY
+  // =========================================
 
   const earningQuery = {
-    transaction_type: Enums.TRANSACTION.TYPE.SESSION,
-
-    direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+    transaction_type:
+      Enums.TRANSACTION.TYPE.SESSION,
+    direction:
+      Enums.TRANSACTION.DIRECTION.CREDIT,
   };
 
   if (dateFilter) {
@@ -158,122 +192,222 @@ exports.getConsultationSessions = async (filters) => {
     mongoose.Types.ObjectId.isValid(astrologer_user_id)
   ) {
     earningUserId = astrologer_user_id;
-  } else if (astrologer_id && mongoose.Types.ObjectId.isValid(astrologer_id)) {
-    const astrologerData = await Astrologer.findById(astrologer_id).lean();
+  } else if (
+    astrologer_id &&
+    mongoose.Types.ObjectId.isValid(astrologer_id)
+  ) {
+    const astrologerData =
+      await Astrologer.findById(
+        astrologer_id,
+      ).lean();
 
-    if (astrologerData?.user_id) {
-      earningUserId = astrologerData.user_id;
-    }
+    earningUserId = astrologerData?.user_id;
   }
 
   if (earningUserId) {
-    const astrologerWallet = await Wallet.findOne({
+    const wallet = await Wallet.findOne({
       user_id: earningUserId,
     }).lean();
 
-    if (astrologerWallet) {
-      earningQuery.wallet_id = astrologerWallet._id;
+    if (wallet) {
+      earningQuery.wallet_id = wallet._id;
     }
   }
 
   // =========================================
-  // TOTAL EARNING
+  // OVERALL EARNING
   // =========================================
-  const earningResult = await WalletLedger.aggregate([
-    {
-      $match: earningQuery,
-    },
 
-    {
-      $group: {
-        _id: null,
-
-        total_earning: {
-          $sum: "$final_amount",
+  const earningResult =
+    await WalletLedger.aggregate([
+      {
+        $match: earningQuery,
+      },
+      {
+        $group: {
+          _id: null,
+          total_earning: {
+            $sum: "$final_amount",
+          },
         },
       },
-    },
+    ]);
+
+  const overall_earning =
+    earningResult[0]?.total_earning || 0;
+
+  // =========================================
+  // BULK IDS
+  // =========================================
+
+  const sessionIds = rawSessions.map(
+    (s) => s._id,
+  );
+
+  const astrologerUserIds = [
+    ...new Set(
+      rawSessions
+        .map((s) =>
+          s.astrologer_user_id?.toString(),
+        )
+        .filter(Boolean),
+    ),
+  ];
+
+  // =========================================
+  // BULK FETCH
+  // =========================================
+
+  const [
+    ledgerEntries,
+    feedbacks,
+    astrologerRates,
+  ] = await Promise.all([
+    WalletLedger.find({
+      related_entity: {
+        $in: sessionIds,
+      },
+      transaction_type:
+        Enums.TRANSACTION.TYPE.SESSION,
+    }).lean(),
+
+    Feedback.find({
+      source_id: {
+        $in: sessionIds,
+      },
+    }).lean(),
+
+    AstrologerServiceRates.find({
+      astrologer_user_id: {
+        $in: astrologerUserIds,
+      },
+    }).lean(),
   ]);
 
-  const overall_earning = earningResult[0]?.total_earning || 0;
+  // =========================================
+  // MAPS
+  // =========================================
+
+  const ledgerMap = new Map();
+
+  ledgerEntries.forEach((entry) => {
+    const key =
+      entry.related_entity.toString();
+
+    if (!ledgerMap.has(key)) {
+      ledgerMap.set(key, []);
+    }
+
+    ledgerMap.get(key).push(entry);
+  });
+
+  const feedbackMap = new Map(
+    feedbacks.map((f) => [
+      f.source_id.toString(),
+      f,
+    ]),
+  );
+
+  const rateMap = new Map(
+    astrologerRates.map((r) => [
+      r.astrologer_user_id.toString(),
+      r,
+    ]),
+  );
 
   // =========================================
-  // SESSION TRANSFORM
+  // TRANSFORM
   // =========================================
-  const sessions = await Promise.all(
-    rawSessions.map(async (session) => {
-      const isFree = session.is_free;
 
+  const sessions = rawSessions.map(
+    (session) => {
       let expected_user_debit = null;
-      let expected_astrologer_credit = null;
+      let expected_astrologer_credit =
+        null;
       let expected_admin_earning = null;
 
-      let actual_user_debit = null;
-      let actual_astrologer_credit = null;
-      let actual_admin_earning = null;
+      let actual_user_debit = 0;
+      let actual_astrologer_credit = 0;
+      let actual_admin_earning = 0;
 
-      // =========================================
-      // PAID SESSION
-      // =========================================
-      if (!isFree && session.total_amount && session.astrologer_user_id) {
-        const { serviceRate } = await getAstrologerDetails(
-          session.astrologer_user_id,
-        );
+      const rate = rateMap.get(
+        session.astrologer_user_id?.toString(),
+      );
 
-        const commissionPercent = serviceRate?.commission_pct ?? 0;
+      if (
+        !session.is_free &&
+        session.total_amount
+      ) {
+        const commission =
+          rate?.commission_pct ?? 0;
 
-        expected_astrologer_credit = Math.round(
-          (commissionPercent / 100) * session.total_amount,
-        );
+        expected_astrologer_credit =
+          Math.round(
+            (commission / 100) *
+              session.total_amount,
+          );
 
         expected_admin_earning =
-          session.total_amount - expected_astrologer_credit;
+          session.total_amount -
+          expected_astrologer_credit;
 
-        expected_user_debit = session.total_amount;
-
-        // =====================================
-        // LEDGER ENTRIES
-        // =====================================
-        const ledgerEntries = await WalletLedger.find({
-          related_entity: session._id,
-
-          transaction_type: Enums.TRANSACTION.TYPE.SESSION,
-        }).lean();
-
-        for (const entry of ledgerEntries) {
-          // USER DEBIT
-          if (entry.direction === Enums.TRANSACTION.DIRECTION.DEBIT) {
-            actual_user_debit = (actual_user_debit || 0) + entry.final_amount;
-          }
-
-          // CREDIT
-          else if (entry.direction === Enums.TRANSACTION.DIRECTION.CREDIT) {
-            // ASTROLOGER
-            if (entry.remarks?.includes("Astrologer")) {
-              actual_astrologer_credit =
-                (actual_astrologer_credit || 0) + entry.final_amount;
-            }
-
-            // ADMIN
-            else if (entry.remarks?.includes("Admin")) {
-              actual_admin_earning =
-                (actual_admin_earning || 0) + entry.final_amount;
-            }
-          }
-        }
+        expected_user_debit =
+          session.total_amount;
       }
 
-      // =========================================
-      // FEEDBACK
-      // =========================================
-      const feedback = await getFeedBackBySourceId(session._id);
+      const entries =
+        ledgerMap.get(
+          session._id.toString(),
+        ) || [];
+
+      entries.forEach((entry) => {
+        if (
+          entry.direction ===
+          Enums.TRANSACTION.DIRECTION
+            .DEBIT
+        ) {
+          actual_user_debit +=
+            entry.final_amount;
+        }
+
+        if (
+          entry.direction ===
+          Enums.TRANSACTION.DIRECTION
+            .CREDIT
+        ) {
+          if (
+            entry.remarks?.includes(
+              "Astrologer",
+            )
+          ) {
+            actual_astrologer_credit +=
+              entry.final_amount;
+          } else if (
+            entry.remarks?.includes(
+              "Admin",
+            )
+          ) {
+            actual_admin_earning +=
+              entry.final_amount;
+          }
+        }
+      });
+
+      const feedback =
+        feedbackMap.get(
+          session._id.toString(),
+        );
 
       return {
         ...session,
 
-        user: sanitizeUser(session.user_id),
+        user: sanitizeUser(
+          session.user_id,
+        ),
 
-        astrologer: sanitizeUser(session.astrologer_id),
+        astrologer: sanitizeUser(
+          session.astrologer_id,
+        ),
 
         expected_user_debit,
         expected_astrologer_credit,
@@ -283,41 +417,48 @@ exports.getConsultationSessions = async (filters) => {
         actual_astrologer_credit,
         actual_admin_earning,
 
-        rating: feedback?.rating ?? null,
+        rating:
+          feedback?.rating ?? null,
 
-        review: feedback?.review ?? null,
+        review:
+          feedback?.review ?? null,
       };
-    }),
+    },
   );
 
-  // =========================================
-  // REMOVE EXTRA IDS
-  // =========================================
   sessions.forEach((session) => {
     delete session.user_id;
     delete session.astrologer_id;
     delete session.astrologer_user_id;
   });
 
-  // =========================================
-  // PAGINATION
-  // =========================================
-  const totalPages = Math.ceil(totalDocs / limit);
+  console.log("limit:", limit);
+  console.log("totalDocs:", totalDocs);
 
-  const pagination = buildPaginationResponse({
-    totalDocs,
-    totalPages,
-    page: parseInt(page),
-    limit: parseInt(limit),
-  });
+  const totalPages = Math.ceil(
+    totalDocs / limit,
+  );
 
-  // =========================================
-  // FINAL RESPONSE
-  // =========================================
+  const pagination =
+    buildPaginationResponse({
+      totalDocs,
+      totalPages,
+      page: Number(page),
+      limit: Number(limit),
+    });
+
+    console.log("pagination:", pagination);
+
   return {
     sessions,
 
     overall_earning,
+
+    attempted_sessions_count,
+
+    non_attempted_sessions_count,
+
+    total_sessions_count,
 
     pagination,
   };

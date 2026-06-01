@@ -10,7 +10,15 @@ const { BadRequestError } = require("../../errors");
 exports.getConsultationSessions = async (req, res, next) => {
   try {
     const filters = req.query;
+    console.log("Received filters:", JSON.stringify(filters));
     const result = await sessionService.getConsultationSessions(filters);
+    const { attempted_sessions_count, non_attempted_sessions_count, total_sessions_count, overall_earning } = result;
+    const stats = {
+      attempted_sessions_count,
+      non_attempted_sessions_count,
+      total_sessions_count,
+      overall_earning,
+    };
     let cachedSpecializations = await CacheService.get(
       "sessions:specializations",
     );
@@ -56,7 +64,7 @@ exports.getConsultationSessions = async (req, res, next) => {
     );
     return res.status(200).json({
       success: true,
-      overall_earning: result.overall_earning || 0,
+      stats,
       sessions: transformedSessions,
       pagination: result.pagination,
     });
