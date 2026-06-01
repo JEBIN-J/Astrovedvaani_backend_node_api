@@ -59,6 +59,7 @@ exports.getConsultationSessions = async (filters) => {
     page = 1,
     limit = 10,
     search,
+    mode
   } = filters;
 
   const query = {};
@@ -77,6 +78,12 @@ exports.getConsultationSessions = async (filters) => {
     const userIds = users.map((u) => u._id);
 
     query.user_id = { $in: userIds };
+  }
+
+    if (mode) {
+      const modeValue = Number(mode);
+      console.log("modeValue", modeValue);
+    query.mode = modeValue;
   }
 
   // =========================================
@@ -131,6 +138,8 @@ exports.getConsultationSessions = async (filters) => {
 
     ConsultationSession.countDocuments(query),
   ]);
+
+  console.log("rawSessions", rawSessions);
 
   const earningQuery = {
     transaction_type: Enums.TRANSACTION.TYPE.SESSION,
