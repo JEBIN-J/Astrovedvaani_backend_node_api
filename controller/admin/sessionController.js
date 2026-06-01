@@ -12,12 +12,12 @@ exports.getConsultationSessions = async (req, res, next) => {
     const filters = req.query;
     console.log("Received filters:", JSON.stringify(filters));
     const result = await sessionService.getConsultationSessions(filters);
-    const { attempted_sessions_count, non_attempted_sessions_count, total_sessions_count, overall_earning } = result;
+    const { attempted_sessions_count, non_attempted_sessions_count, total_sessions_count, revenue } = result;
     const stats = {
       attempted_sessions_count,
       non_attempted_sessions_count,
       total_sessions_count,
-      overall_earning,
+      revenue,
     };
     let cachedSpecializations = await CacheService.get(
       "sessions:specializations",

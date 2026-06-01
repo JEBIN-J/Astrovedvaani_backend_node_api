@@ -133,41 +133,76 @@ exports.getConsultationSessions = async (filters) => {
   // =========================================
 
   const [
-    rawSessions,
-    totalDocs,
-    attempted_sessions_count,
-    non_attempted_sessions_count,
-  ] = await Promise.all([
-    ConsultationSession.find(query)
-      .populate("user_id")
-      .populate("astrologer_id")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .lean(),
+  rawSessions,
+  totalDocs,
+  attempted_sessions_count,
+  non_attempted_sessions_count,
+  revenueSessions,
+] = await Promise.all([
+  ConsultationSession.find(query)
+    .populate("user_id")
+    .populate("astrologer_id")
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(Number(limit))
+    .lean(),
 
-    ConsultationSession.countDocuments(query),
+  ConsultationSession.countDocuments(query),
 
-    ConsultationSession.countDocuments({
-      ...query,
-      status: Enums.SERVICE.STATUS.COMPLETED,
-    }),
+  ConsultationSession.countDocuments({
+    ...query,
+    status: Enums.SERVICE.STATUS.COMPLETED,
+  }),
 
-    ConsultationSession.countDocuments({
-      ...query,
-      status: {
-        $in: [
-          Enums.SERVICE.STATUS.CANCELLED,
-          Enums.SERVICE.STATUS.NO_SHOW,
-        ],
-      },
-    }),
-  ]);
+  ConsultationSession.countDocuments({
+    ...query,
+    status: {
+      $in: [
+        Enums.SERVICE.STATUS.CANCELLED,
+        Enums.SERVICE.STATUS.NO_SHOW,
+      ],
+    },
+  }),
+
+  ConsultationSession.find({...query, status: Enums.SERVICE.STATUS.COMPLETED})
+    .select(
+      "total_amount astrologer_share_amount"
+    )
+    .lean(),
+]);
 
 
   const total_sessions_count =
     attempted_sessions_count +
     non_attempted_sessions_count;
+
+
+    let total_earning = 0;
+let astrologer_earning = 0;
+let admin_earning = 0;
+
+for (const session of revenueSessions) {
+  const totalAmount = Number(session.total_amount || 0);
+
+  const astrologerAmount = Number(
+    session.astrologer_share_amount || 0,
+  );
+
+  total_earning += totalAmount;
+
+  astrologer_earning += astrologerAmount;
+
+  admin_earning +=
+    totalAmount - astrologerAmount;
+}
+
+const revenue = {
+  total_earning: Number(total_earning.toFixed(2)),
+
+  astrologer_earning: Number(astrologer_earning.toFixed(2)),
+
+  admin_earning: Number(admin_earning.toFixed(2)) ,
+};
 
 
   // =========================================
@@ -451,6 +486,8 @@ exports.getConsultationSessions = async (filters) => {
 
   return {
     sessions,
+
+    revenue,
 
     overall_earning,
 
