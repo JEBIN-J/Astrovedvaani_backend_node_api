@@ -316,9 +316,9 @@ exports.getConsultationSessions = async (filters) => {
   // =========================================
 
   const sessions = rawSessions.map((session) => {
-    let expected_user_debit = null;
-    let expected_astrologer_credit = null;
-    let expected_admin_earning = null;
+    let expected_user_debit = 0;
+    let expected_astrologer_credit = 0;
+    let expected_admin_earning = 0;
 
     let actual_user_debit = 0;
     let actual_astrologer_credit = 0;
@@ -327,11 +327,7 @@ exports.getConsultationSessions = async (filters) => {
     const rate = rateMap.get(session.astrologer_user_id?.toString());
 
     if (!session.is_free && session.total_amount) {
-      const commission = rate?.commission_pct ?? 0;
-
-      expected_astrologer_credit = Math.round(
-        (commission / 100) * session.total_amount,
-      );
+      expected_astrologer_credit = session.astrologer_share_amount || 0;
 
       expected_admin_earning =
         session.total_amount - expected_astrologer_credit;
