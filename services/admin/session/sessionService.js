@@ -10,6 +10,7 @@ const ChatMessage = require("../../../models/Chat");
 const Astrologer = require("../../../models/Astrologer");
 const Wallet = require("../../../models/Wallet");
 const Feedback = require("../../../models/Feedback");
+const User = require("../../../models/User");
 const AstrologerServiceRates = require("../../../models/AstrologerServiceRates");
 function sanitizeUser(user) {
   if (!user) return null;
@@ -72,18 +73,45 @@ exports.getConsultationSessions = async (filters) => {
   // SEARCH FILTER
   // =========================================
 
-  if (search) {
-    const users = await User.find({
-      mobileNumber: {
-        $regex: search,
-        $options: "i",
-      },
-    }).select("_id");
+if (search?.trim()) {
+  const searchRegex = new RegExp(search.trim(), "i");
 
-    query.user_id = {
-      $in: users.map((u) => u._id),
-    };
+  const [matchedUsers, matchedAstrologers] = await Promise.all([
+    User.find({
+      $or: [
+        { name: searchRegex },
+        { mobileNumber: searchRegex },
+        { email: searchRegex },
+      ],
+    }).select("_id"),
+
+    Astrologer.find({
+      display_name: searchRegex,
+    }).select("_id"),
+  ]);
+
+  const userIds = matchedUsers.map((u) => u._id);
+
+  const astrologerIds = matchedAstrologers.map((a) => a._id);
+
+  query.$or = [
+    ...(userIds.length
+      ? [
+          { user_id: { $in: userIds } },
+          { astrologer_user_id: { $in: userIds } },
+        ]
+      : []),
+
+    ...(astrologerIds.length
+      ? [{ astrologer_id: { $in: astrologerIds } }]
+      : []),
+  ];
+
+  // If nothing matched, return no records
+  if (query.$or.length === 0) {
+    query._id = null;
   }
+}
 
   if (mode) {
     query.mode = Number(mode);
