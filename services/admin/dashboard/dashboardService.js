@@ -761,6 +761,10 @@ const getBalanceSummary = async () => {
       case Enums.USER.ROLE.ADMIN:
         summary.admins = round2(item.totalBalance);
         break;
+
+      case Enums.USER.ROLE.SUPER_ADMIN:
+        summary.admins += round2(item.totalBalance);
+        break;  
     }
   });
 
