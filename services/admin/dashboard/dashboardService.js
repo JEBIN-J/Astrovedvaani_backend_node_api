@@ -609,22 +609,186 @@ const getRechargeSummary = async () => {
     },
   };
 };
+const getGSTSummary = async () => {
+  const {
+    todayStart,
+    yesterdayStart,
+    lastWeekStart,
+    lastMonthStart,
+    last6MonthStart,
+    lastYearStart,
+  } = getDateRangesB();
+
+  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
+
+  const buildFacet = (match = {}) => [
+    { $match: match },
+    {
+      $group: {
+        _id: null,
+        gst: {
+          $sum: {
+            $cond: [
+              { $gt: ["$gst_percent", 0] },
+              {
+                $subtract: [
+                  "$amount",
+                  {
+                    $divide: [
+                      "$amount",
+                      {
+                        $add: [1, { $divide: ["$gst_percent", 100] }],
+                      },
+                    ],
+                  },
+                ],
+              },
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ];
+
+  const result = await Ledger.aggregate([
+    {
+      $match: {
+        transaction_type: Enums.TRANSACTION.TYPE.RECHARGE,
+        direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+        payment_status: Enums.PAYMENT.STATUS.PAID,
+      },
+    },
+    {
+      $facet: {
+        lifetime: buildFacet(),
+        lastYear: buildFacet({
+          timestamp: { $gte: lastYearStart },
+        }),
+        last6Month: buildFacet({
+          timestamp: { $gte: last6MonthStart },
+        }),
+        lastMonth: buildFacet({
+          timestamp: { $gte: lastMonthStart },
+        }),
+        lastWeek: buildFacet({
+          timestamp: { $gte: lastWeekStart },
+        }),
+        yesterday: buildFacet({
+          timestamp: {
+            $gte: yesterdayStart,
+            $lt: todayStart,
+          },
+        }),
+        today: buildFacet({
+          timestamp: {
+            $gte: todayStart,
+            $lt: tomorrowStart,
+          },
+        }),
+      },
+    },
+  ]);
+
+  const d = result[0] || {};
+
+  return {
+    lifetime: round2(d.lifetime?.[0]?.gst || 0),
+    lastYear: round2(d.lastYear?.[0]?.gst || 0),
+    last6Month: round2(d.last6Month?.[0]?.gst || 0),
+    lastMonth: round2(d.lastMonth?.[0]?.gst || 0),
+    lastWeek: round2(d.lastWeek?.[0]?.gst || 0),
+    yesterday: round2(d.yesterday?.[0]?.gst || 0),
+    today: round2(d.today?.[0]?.gst || 0),
+  };
+};
+
+const getBalanceSummary = async () => {
+  const balances = await Wallet.aggregate([
+    {
+      $lookup: {
+        from: "users",
+        localField: "user_id",
+        foreignField: "_id",
+        as: "user",
+      },
+    },
+    { $unwind: "$user" },
+
+    {
+      $match: {
+        "user.isDeleted": false,
+      },
+    },
+
+    {
+      $group: {
+        _id: "$user.role",
+        totalBalance: {
+          $sum: "$balance",
+        },
+        count: {
+          $sum: 1,
+        },
+      },
+    },
+  ]);
+
+  const summary = {
+    users: 0,
+    astrologers: 0,
+    vendors: 0,
+    admins: 0,
+    total: 0,
+  };
+
+  balances.forEach((item) => {
+    summary.total += item.totalBalance;
+
+    switch (item._id) {
+      case Enums.USER.ROLE.USER:
+        summary.users = round2(item.totalBalance);
+        break;
+
+      case Enums.USER.ROLE.ASTROLOGER:
+        summary.astrologers = round2(item.totalBalance);
+        break;
+
+      case Enums.USER.ROLE.VENDOR:
+        summary.vendors = round2(item.totalBalance);
+        break;
+
+      case Enums.USER.ROLE.ADMIN:
+        summary.admins = round2(item.totalBalance);
+        break;
+    }
+  });
+
+  summary.total = round2(summary.total);
+
+  return summary;
+};
 exports.getWalletSummary = async () => {
-  const [currentBalance, recharge] = await Promise.all([
+  const [
+    currentBalance,
+    recharge,
+    gst,
+    balances,
+  ] = await Promise.all([
     getCurrentBalance(),
     getRechargeSummary(),
+    getGSTSummary(),
+    getBalanceSummary(),
   ]);
 
   return {
     currentBalance,
-    lifetime: recharge.lifetime,
-    lastYear: recharge.lastYear,
-    last6Month: recharge.last6Month,
-    lastMonth: recharge.lastMonth,
-    lastWeek: recharge.lastWeek,
-    yesterday: recharge.yesterday,
-    today: recharge.today,
-    frequent: recharge.frequent,
+
+    balances,
+
+    recharge,
+
+    gst,
   };
 };
 
