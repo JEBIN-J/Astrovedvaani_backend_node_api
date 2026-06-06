@@ -6,12 +6,14 @@ const fs = require("fs");
 const puppeteer = require("puppeteer");
 
 const Wallet = require("../../../models/Wallet");
-const WalletLedger = require("../../../models/WalletLedger");
+const WalletLedger = require("../../../models/Ledger");
 const User = require("../../../models/User");
 const SalarySlip = require("../../../models/SalarySlip");
+const Enums = require("../../../utils/constants");
 
-const uploadPDF = require("../invoice/uploadPDF");
-
+const uploadPDF =
+  require("../../../services/communication/template/invoiceTemplate").uploadPDF;
+const ConsultationSession = require("../../../models/ConsultationSession");
 exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
   // =====================================
   // DUPLICATE CHECK
@@ -79,29 +81,60 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
   // =====================================
   // CALCULATIONS
   // =====================================
-  let totalChatEarnings = 0;
+  // =====================================
+  // CONSULTATION SESSIONS
+  // =====================================
+  const sessions = await ConsultationSession.find({
+    astrologer_user_id: userId,
 
+    status: Enums.SERVICE.STATUS.COMPLETED,
+
+    payment_status: Enums.PAYMENT.STATUS.PAID,
+
+    start_time: {
+      $gte: startDate,
+      $lt: endDate,
+    },
+  }).lean();
+
+  // =====================================
+  // CALCULATIONS
+  // =====================================
+  let totalChatEarnings = 0;
   let totalCallEarnings = 0;
+  let totalVideoEarnings = 0;
 
   let totalChatMinutes = 0;
-
   let totalCallMinutes = 0;
+  let totalVideoMinutes = 0;
 
-  transactions.forEach((txn) => {
-    if (txn.related_entity_type === "CHAT") {
-      totalChatEarnings += Number(txn.amount || 0);
+  sessions.forEach((session) => {
+    const earning = Number(session.astrologer_share_amount || 0);
+    const minutes = Number(session.duration_minutes || 0);
 
-      totalChatMinutes += Number(txn.minutes || 0);
-    }
+    switch (session.mode) {
+      case Enums.SERVICE.TYPE.CHAT:
+        totalChatEarnings += earning;
+        totalChatMinutes += minutes;
+        break;
 
-    if (txn.related_entity_type === "CALL") {
-      totalCallEarnings += Number(txn.amount || 0);
+      case Enums.SERVICE.TYPE.CALL:
+        totalCallEarnings += earning;
+        totalCallMinutes += minutes;
+        break;
 
-      totalCallMinutes += Number(txn.minutes || 0);
+      case Enums.SERVICE.TYPE.VIDEO:
+        totalVideoEarnings += earning;
+        totalVideoMinutes += minutes;
+        break;
+
+      default:
+        break;
     }
   });
 
-  const totalEarnings = totalChatEarnings + totalCallEarnings;
+  const totalEarnings =
+    totalChatEarnings + totalCallEarnings + totalVideoEarnings;
 
   const finalPayout = totalEarnings;
 
@@ -112,30 +145,24 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
   // =====================================
   const templatePath = path.join(
     __dirname,
-    "../templates/salarySlipTemplate.ejs",
+    "../template/salarySlipTemplate.ejs",
   );
-
   const html = await ejs.renderFile(templatePath, {
     astrologer,
-
-    transactions,
-
+    sessions,
     month,
-
     year,
 
     totalChatEarnings,
-
     totalCallEarnings,
+    totalVideoEarnings,
 
     totalChatMinutes,
-
     totalCallMinutes,
+    totalVideoMinutes,
 
     totalEarnings,
-
     finalPayout,
-
     slipNumber,
   });
 
@@ -196,26 +223,23 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
     user_id: userId,
 
     month,
-
     year,
 
     slip_number: slipNumber,
 
     total_chat_minutes: totalChatMinutes,
-
     total_call_minutes: totalCallMinutes,
+    total_video_minutes: totalVideoMinutes,
 
     total_chat_earnings: totalChatEarnings,
-
     total_call_earnings: totalCallEarnings,
+    total_video_earnings: totalVideoEarnings,
 
     total_earnings: totalEarnings,
-
     final_payout: finalPayout,
 
     pdf_url: uploadedUrl,
   });
-
   return {
     success: true,
 
