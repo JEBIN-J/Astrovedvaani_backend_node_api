@@ -6,7 +6,7 @@ const astrologerActivityController = require("../../controller/admin/astrologerA
 
 // GET /admin/astrologer/:astrologerId/activity
 router.get(
-  "/astrologer/activity",
+  "/",
   astrologerActivityController.getAstrologerActivity,
 );
 
