@@ -16,6 +16,7 @@ require("./utils/firebase");
 const app = express();
 app.set("trust proxy", 1);
 require("./schedule/notificationWorker");
+require("./schedule/astrologerActivity");
 app.use(express.static(__dirname + "/public"));
 // server.js
 

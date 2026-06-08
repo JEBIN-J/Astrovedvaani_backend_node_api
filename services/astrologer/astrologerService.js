@@ -11,6 +11,10 @@ const astrologerOfferService = require("../astrologer/astrologerOfferService");
 const {
   emitAstrologerAvailability,
 } = require("../socket/handleAstrologerEvents");
+const {
+  markAstrologerOnline,
+  markAstrologerOffline,
+} = require("../../utils/astrologerActivity");
 
 const ASTROLOGER_CACHE_PREFIX = "astro:list";
 
@@ -281,6 +285,21 @@ async function fetchCompleteUserProfile(userId) {
     throw error;
   }
 }
+
+function runInBackground(fn) {
+  setImmediate(async () => {
+    try {
+      await fn();
+    } catch (error) {
+      logger.error(
+        "[Background Job Error]",
+        error
+      );
+    }
+  });
+}
+
+
 async function updateAvailabilityStatusService(userId, statusData) {
   try {
     logger.info(
@@ -292,6 +311,8 @@ async function updateAvailabilityStatusService(userId, statusData) {
     if (!astrologer) {
       throw new Error("Astrologer profile not found");
     }
+
+    const previousOnlineStatus = astrologer.is_online;
 
     const { is_online, isChat, isCall, isVideo } = statusData;
 
@@ -314,6 +335,14 @@ async function updateAvailabilityStatusService(userId, statusData) {
       { $set: updatePayload },
       { new: true },
     );
+
+    if (!previousOnlineStatus && updated.is_online) {
+      runInBackground(() => markAstrologerOnline(updated._id));
+    }
+
+    if (previousOnlineStatus && !updated.is_online) {
+      runInBackground(() => markAstrologerOffline(updated._id));
+    }
 
     await CacheService.clearMatchingKeys(ASTROLOGER_CACHE_PREFIX);
 
