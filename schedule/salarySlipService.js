@@ -2,7 +2,9 @@ const cron = require("node-cron");
 
 const User = require("../models/User");
 
-const { generateSalarySlipPdf } = require("../services/salarySlipService");
+const {
+  generateSalarySlipPdf,
+} = require("../services/communication/template/salarySlipTemplate");
 
 const Enums = require("../utils/constants");
 
@@ -30,7 +32,7 @@ exports.startSalarySlipCron = () => {
 
         const astrologers = await User.find({
           role: Enums.USER.ROLE.ASTROLOGER,
-
+          isDeleted: false,
           isActive: true,
         }).lean();
 
