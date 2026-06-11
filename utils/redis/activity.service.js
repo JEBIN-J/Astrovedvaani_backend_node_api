@@ -43,10 +43,16 @@ async function updateUserActivity(
 
     if (eventType === "CONNECT") {
       data.connectTime = now;
+      if (!data.disconnectTime) {
+        data.disconnectTime = 0;
+      }
     }
 
     if (eventType === "DISCONNECT") {
       data.disconnectTime = now;
+      if (!data.connectTime) {
+        data.connectTime = 0;
+      }
     }
 
     await redis.set(
