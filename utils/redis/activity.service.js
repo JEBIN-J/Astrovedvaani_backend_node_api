@@ -24,6 +24,7 @@ async function updateUserActivity(
     const key = `activity:${userId}`;
 
     let data = {
+      userId,
       role,
       connectTime: 0,
       disconnectTime: 0,
