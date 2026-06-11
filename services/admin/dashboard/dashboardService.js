@@ -532,7 +532,7 @@ const getRechargeSummary = async () => {
         transaction_type: Enums.TRANSACTION.TYPE.RECHARGE,
         direction: Enums.TRANSACTION.DIRECTION.CREDIT,
         payment_status: Enums.PAYMENT.STATUS.PAID,
-        credit_amount: { $gt: 0 },
+        amount: { $gt: 0 },
 
         "user.role": Enums.USER.ROLE.USER,
         "user.isDeleted": false,
@@ -543,27 +543,27 @@ const getRechargeSummary = async () => {
     {
       $facet: {
         lifetime: [
-          { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
+          { $group: { _id: null, amount: { $sum: "$amount" } } },
         ],
 
         lastYear: [
           { $match: { timestamp: { $gte: lastYearStart } } },
-          { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
+          { $group: { _id: null, amount: { $sum: "$amount" } } },
         ],
 
         last6Month: [
           { $match: { timestamp: { $gte: last6MonthStart } } },
-          { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
+          { $group: { _id: null, amount: { $sum: "$amount" } } },
         ],
 
         lastMonth: [
           { $match: { timestamp: { $gte: lastMonthStart } } },
-          { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
+          { $group: { _id: null, amount: { $sum: "$amount" } } },
         ],
 
         lastWeek: [
           { $match: { timestamp: { $gte: lastWeekStart } } },
-          { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
+          { $group: { _id: null, amount: { $sum: "$amount" } } },
         ],
 
         yesterday: [
@@ -572,7 +572,7 @@ const getRechargeSummary = async () => {
               timestamp: { $gte: yesterdayStart, $lt: todayStart },
             },
           },
-          { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
+          { $group: { _id: null, amount: { $sum: "$amount" } } },
         ],
 
         today: [
@@ -581,11 +581,11 @@ const getRechargeSummary = async () => {
               timestamp: { $gte: todayStart, $lt: tomorrowStart },
             },
           },
-          { $group: { _id: null, amount: { $sum: "$credit_amount" } } },
+          { $group: { _id: null, amount: { $sum: "$amount" } } },
         ],
 
         frequent: [
-          { $group: { _id: "$credit_amount", count: { $sum: 1 } } },
+          { $group: { _id: "$amount", count: { $sum: 1 } } },
           { $sort: { count: -1 } },
           { $limit: 1 },
         ],
