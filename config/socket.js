@@ -131,6 +131,7 @@ class SocketManager {
             const usedMinutes = Math.ceil(elapsed / 60000);
             const billableMinutes = Math.min(usedMinutes, session.duration_minutes);
             const finalAmount = session.is_free ? 0 : billableMinutes * session.rate_per_minute;
+            console.log(`[TIMEOUT] Auto-ending session ${sessionId} after 30s disconnect. Billable minutes: ${billableMinutes}, final amount: ${finalAmount}`);
             logger.info(`[TIMEOUT] Auto-ending session ${sessionId}`);
             const isAstrologer = userId.toString() === session.astrologer_user_id.toString();
             const statusReason = isAstrologer
@@ -144,7 +145,7 @@ class SocketManager {
                 forced_end_reason: `Participant ${userId} disconnected for too long`,
                 duration_minutes: billableMinutes,
                 total_amount: finalAmount,
-                payment_status: Enums.PAYMENT.STATUS.COMPLETED,
+                payment_status: Enums.PAYMENT.STATUS.PAID,
                 status: Enums.SERVICE.STATUS.COMPLETED,
                 status_reason: statusReason,
               },
