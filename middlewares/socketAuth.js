@@ -58,6 +58,11 @@ module.exports = async (socket, next) => {
       );
     }
   }
-  await updateUserActivity(userId.toString(), user.role, "SOCKET_CONNECT");
+  await updateUserActivity(
+  userId.toString(),
+  user.role,
+  "CONNECT",
+  "SOCKET_CONNECT"
+);
   next();
 };
