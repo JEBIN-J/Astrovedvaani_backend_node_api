@@ -961,7 +961,7 @@ function handleChatRequestEvents(socketManager, socket) {
         {
           status: Enums.SERVICE.STATUS.REJECTED,
           status_reason:
-            Enums.SERVICE.STATUS_REASON.REJECTED.ASTROLOGER_REJECTED,
+            Enums.SERVICE.STATUS_REASON.CANCELLED.ASTROLOGER_REJECTED,
           rejection_reason: rejectionReason,
         },
         { new: true },

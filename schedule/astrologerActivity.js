@@ -79,7 +79,7 @@ async function rolloverOnlineAstrologers() {
 }
 
 cron.schedule(
-  "52 15 * * *",
+  "0 0 * * *",
   rolloverOnlineAstrologers,
   {
     timezone: "Asia/Kolkata",
