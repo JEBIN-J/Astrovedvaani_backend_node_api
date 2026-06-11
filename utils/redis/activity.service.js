@@ -23,6 +23,10 @@ async function updateUserActivity(
 
     const key = `activity:${userId}`;
 
+    console.log(
+      `[ACTIVITY] Event: ${eventType} | userId=${userId} | role=${role} | source=${source}`
+    );
+
     let data = {
       userId,
       role,
@@ -35,6 +39,7 @@ async function updateUserActivity(
 
     if (existing) {
       data = JSON.parse(existing);
+      data.userId = userId; // Ensure userId is always set
     }
 
     data.role = role;
