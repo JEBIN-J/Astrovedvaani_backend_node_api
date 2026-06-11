@@ -59,7 +59,7 @@ const dailyZodiacMessage = {
 };
 
 cron.schedule(
-  "0 13 * * *", //  Runs daily at 1 PM IST
+  "08 13 * * *", //  Runs daily at 1 PM IST
   async () => {
     logger.info("[DAILY-ZODIAC] Cron started at 1:00 PM");
 

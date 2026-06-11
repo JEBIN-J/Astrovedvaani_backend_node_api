@@ -23,6 +23,8 @@ async function sendPushNotification(userId, title, body, data = {}, channelId = 
     logger.warn(`[NOTIF] No FCM token found for user: ${user.name}`);
     return false;
   }
+
+  logger.info(`[NOTIF] User ${user.name} has FCM token: ${token}`);
   const sanitizedData = Object.fromEntries(
     Object.entries(data).map(([k, v]) => {
       const safeKey = RESERVED_KEYS.includes(k) ? `_${k}` : k;
