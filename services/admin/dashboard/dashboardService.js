@@ -74,6 +74,12 @@ async function getActiveCounts() {
     getActiveCountByRole(Enums.USER.ROLE.VENDOR),
   ]);
 
+  console.log("Active counts from Redis:", {
+    users: activeUsersRedis,
+    astrologers: activeAstrosRedis,
+    vendors: activeVendorsRedis,
+  });
+
   const activeUsers =
     activeUsersRedis !== null
       ? activeUsersRedis
