@@ -16,9 +16,13 @@ async function getActiveCountByRole(role) {
       console.log(`Checking activity for user ${userId} with role ${data.role}`);
       console.log(`Last seen: ${new Date(data.lastSeen).toISOString()}, now: ${new Date(now).toISOString()}`);
       console.log("data:", data);
-      if (data?.connectTime >= data?.disconnectTime) {
-        console.log(`User ${userId} is active`);
-        count++;
+      if(data?.connectTime > 0)
+      {
+        console.log(`User ${userId} connectTime: ${new Date(data.connectTime).toISOString()}`);
+        if (data?.connectTime >= data?.disconnectTime) {
+          console.log(`User ${userId} is active`);
+          count++;
+        }
       }
     }
     return count;
