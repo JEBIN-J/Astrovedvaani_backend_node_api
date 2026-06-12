@@ -8,6 +8,7 @@ async function getActiveCountByRole(role) {
     const now = Date.now();
     let count = 0;
     for (const key of keys) {
+      console.log(`Checking key ${key} for role ${role}`);
       const raw = await redis.get(key);
       if (!raw) continue;
       const data = JSON.parse(raw);
