@@ -28,6 +28,7 @@ const CacheService = require("../utils/redis/cacheService");
 const Wallet = require("../models/Wallet");
 const UserAstrology = require("../models/UserAstrology");
 const redisClient = require("../utils/redis/redisClient");
+const Astrologer = require("../models/Astrologer");
 const ASTROLOGER_CACHE_PREFIX = "astro:list";
 
 const generateAuthTokens = (user, deviceId, onlyAccessToken = false) => {
@@ -459,6 +460,28 @@ const signUp = async ({ email, password, name, role, mobileNumber }) => {
 
       await existingUser.save();
       await createWallet(existingUser._id);
+      if (Number(userRole) === Enums.USER.ROLE.ASTROLOGER) {
+        await Astrologer.create({
+          user_id: existingUser._id,
+          display_name: name,
+          bio: "",
+          profilePicture: null,
+          specializations: [],
+          languages_spoken: [],
+          experience_years: 0,
+          calendar_availability: {},
+          timezone: null,
+          is_online: false,
+          isChat: false,
+          isCall: false,
+          isVideo: false,
+          is_premium: false,
+          is_busy: false,
+          premium_expiry: null,
+          premium_boost: 0,
+          kyc_details: {},
+        });
+      }
     }
 
     const { accessToken, refreshToken } = generateAuthTokens(existingUser);

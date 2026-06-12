@@ -3,8 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>Invoice <%= invoice.invoice_number %>
-  </title>
+  <title>Invoice <%= invoice.invoice_number %></title>
   <style>
     body {
       font-family: "Helvetica Neue", Arial, sans-serif;
@@ -58,7 +57,6 @@
       justify-content: space-between;
       margin-bottom: 20px;
       column-gap: 40px;
-      /* spacing between dealer & billing */
     }
 
     .addresses div {
@@ -68,7 +66,6 @@
     .addresses .billing {
       padding-left: 20px;
       border-left: 1px solid #ddd;
-      /* optional vertical line */
     }
 
     .total-table th,
@@ -90,48 +87,56 @@
 <body>
   <!-- Header -->
   <div class="header">
-        <img src="https://api.astrovedvaani.com/uploads/ved.png" alt="Astrovedvaani Logo"/>
-<div class="company-details">
-  <strong>Vedvaani</strong><br>
+    <img src="https://api.astrovedvaani.com/uploads/ved.png" alt="Astrovedvaani Logo" />
 
-  📍 1137, Bhutani Alphathum, Sector 90,
-  Noida, India, 201301 <br>
+    <div class="company-details">
+      <strong>Vedvaani</strong><br>
 
-  ✉ support@vedvaani.com <br>
+       C/35, Shila Kuty, Hajipur Jadhua Road,<br>
+      Professor Colony, Hajipur,<br>
+      Vaishali, Bihar - 844101<br>
 
-  ☎ +91 96278 65333
-</div>
-  </div>
+      ✉ support@vedvaani.com <br>
 
-  <!-- Invoice Info -->
-  <h2>Invoice #<%= invoice.invoice_number %>
-  </h2>
-  <p>Date: <%= new Date(invoice.issued_at).toLocaleDateString() %>
-  </p>
-
-  <!-- Addresses -->
-  <div class="addresses" style="display: flex; justify-content: space-between; margin-bottom: 20px; gap: 60px;">
-<div class="dealer" style="width: 48%;">
-  <strong>Dealer / Seller:</strong><br>
-
-  Vedvaani <br>
-
-  1137, Bhutani Alphathum, Sector 90,
-  Noida, India, 201301 <br>
-
-  support@vedvaani.com <br>
-
-  +91 96278 65333
-</div>
-    <div class="billing" style="width: 48%; padding-left: 20px; border-left: 1px solid #ddd;">
-      <strong>Billing Address:</strong><br>
-      <%= invoice.address_snapshot.full_name %><br>
-        <%= invoice.address_snapshot.address_line1 %>, <%= invoice.address_snapshot.city %><br>
-            <%= invoice.address_snapshot.state %> - <%= invoice.address_snapshot.pincode %><br>
-                Mobile: <%= invoice.address_snapshot.mobile_number %>
+      ☎ +91 9667002566
     </div>
   </div>
 
+  <!-- Invoice Info -->
+  <h2>Invoice #<%= invoice.invoice_number %></h2>
+  <p>Date: <%= new Date(invoice.issued_at).toLocaleDateString() %></p>
+
+  <!-- Addresses -->
+  <div class="addresses" style="display: flex; justify-content: space-between; margin-bottom: 20px; gap: 60px;">
+
+    <div class="dealer" style="width: 48%;">
+      <strong>Dealer / Seller:</strong><br>
+
+      Vedvaani <br>
+
+      C/35, Shila Kuty, Hajipur Jadhua Road,<br>
+      Professor Colony, Hajipur,<br>
+      Vaishali, Bihar - 844101 <br>
+
+      support@vedvaani.com <br>
+
+      +91 9667002566
+    </div>
+
+    <div class="billing" style="width: 48%; padding-left: 20px; border-left: 1px solid #ddd;">
+      <strong>Billing Address:</strong><br>
+
+      <%= invoice.address_snapshot.full_name %><br>
+
+      <%= invoice.address_snapshot.address_line1 %>,
+      <%= invoice.address_snapshot.city %><br>
+
+      <%= invoice.address_snapshot.state %> -
+      <%= invoice.address_snapshot.pincode %><br>
+
+      Mobile: <%= invoice.address_snapshot.mobile_number %>
+    </div>
+  </div>
 
   <!-- Product Details -->
   <table>
@@ -146,34 +151,17 @@
       <th>Qty</th>
       <th>Total (₹)</th>
     </tr>
+
     <tr>
-      <td>
-        <%= product.name || "N/A" %>
-      </td>
-      <td>
-        <%= product.sku || "N/A" %>
-      </td>
-      <td>
-        <%= invoice.price_snapshot.selling_price %>
-      </td>
-      <td>
-        <%= invoice.price_snapshot.discount %>
-      </td>
-      <td>
-        <%= invoice.price_snapshot.gst_percent %>
-      </td>
-      <td>
-        <%= invoice.price_snapshot.delivery_charge %>
-      </td>
-      <td>
-        <%= invoice.price_snapshot.final_price %>
-      </td>
-      <td>
-        <%= invoice.price_snapshot.quantity %>
-      </td>
-      <td>
-        <%= invoice.price_snapshot.total_payable %>
-      </td>
+      <td><%= product.name || "N/A" %></td>
+      <td><%= product.sku || "N/A" %></td>
+      <td><%= invoice.price_snapshot.selling_price %></td>
+      <td><%= invoice.price_snapshot.discount %></td>
+      <td><%= invoice.price_snapshot.gst_percent %></td>
+      <td><%= invoice.price_snapshot.delivery_charge %></td>
+      <td><%= invoice.price_snapshot.final_price %></td>
+      <td><%= invoice.price_snapshot.quantity %></td>
+      <td><%= invoice.price_snapshot.total_payable %></td>
     </tr>
   </table>
 
@@ -181,13 +169,12 @@
   <table class="total-table">
     <tr>
       <th>Total Payable:</th>
-      <td>₹<%= invoice.price_snapshot.total_payable %>
-      </td>
+      <td>₹<%= invoice.price_snapshot.total_payable %></td>
     </tr>
   </table>
 
   <div class="footer">
-    This is a computer-generated invoice. Thank you for shopping with astrovedvaani.
+    This is a computer-generated invoice. Thank you for shopping with Vedvaani.
   </div>
 </body>
 

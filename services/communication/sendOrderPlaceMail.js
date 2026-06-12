@@ -9,7 +9,7 @@ const sendOrderAcceptedMail = async ({
   orderAmount,
 }) => {
   const html = generateEmailTemplate({
-    title: `Order Accepted Successfully 🎉`,
+    title: `Order Accepted Successfully`,
 
     message: `
       Dear ${customerName},<br/><br/>

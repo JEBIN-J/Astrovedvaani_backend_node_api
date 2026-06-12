@@ -18,7 +18,7 @@ const {
 } = require("../socket/poojaSocket");
 const Wallet = require("../../models/Wallet");
 const WalletLedger = require("../../models/Ledger");
-
+const walletNotification = require("../socket/walletNotification");
 exports.getPoojas = async ({ page = 1, limit = 10, search = "" }) => {
   try {
     const skip = (page - 1) * limit;
@@ -269,9 +269,6 @@ exports.updatePoojaBooking = async (userId, bookingId, status, updateData) => {
       throw new BadRequestError("This booking cannot be updated");
     }
 
-    // -----------------------------
-    // CANCEL BOOKING → REFUND
-    // -----------------------------
     if (status === Enums.ORDER.STATUS.CANCELLED) {
       const userWallet = await Wallet.findOne({ user_id: userId });
       const adminUserId = await getAdminUserId();
@@ -295,14 +292,15 @@ exports.updatePoojaBooking = async (userId, bookingId, status, updateData) => {
       );
 
       await Promise.all([userWallet.save(), adminWallet.save()]);
-
-      // 🔐 Capture closing balances
+      walletNotification.emitWalletUpdate(
+        userId,
+        userWallet.balance,
+        "success",
+      );
+      //  Capture closing balances
       const userClosingBalance = userWallet.balance;
       const adminClosingBalance = adminWallet.balance;
 
-      // -----------------------------
-      // LEDGER ENTRIES (WITH OPEN/CLOSE)
-      // -----------------------------
       const remarks = `Pooja Cancelled: ${booking.pooja_id.name}`;
       const timestamp = new Date();
 
@@ -343,9 +341,6 @@ exports.updatePoojaBooking = async (userId, bookingId, status, updateData) => {
         },
       ]);
 
-      // -----------------------------
-      // UPDATE BOOKING + ORDER
-      // -----------------------------
       booking.booking_status = Enums.ORDER.STATUS.CANCELLED;
       booking.payment_status = Enums.PAYMENT.STATUS.REFUNDED;
       await booking.save();
@@ -365,9 +360,6 @@ exports.updatePoojaBooking = async (userId, bookingId, status, updateData) => {
       return { message: "Booking cancelled and refunded successfully" };
     }
 
-    // -----------------------------
-    // RESCHEDULE FLOW (UNCHANGED)
-    // -----------------------------
     const { scheduled_date, scheduled_time } = updateData;
 
     if (!scheduled_date || !scheduled_time)

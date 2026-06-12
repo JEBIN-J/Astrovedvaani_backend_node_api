@@ -8,7 +8,7 @@ const sendOrderDeliveredMail = async ({
   deliveryDate,
 }) => {
   const html = generateEmailTemplate({
-    title: `Order Delivered Successfully 🎉`,
+    title: `Order Delivered Successfully`,
 
     message: `
       Dear ${customerName},<br/><br/>

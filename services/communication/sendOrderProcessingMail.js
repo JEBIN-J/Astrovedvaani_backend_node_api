@@ -8,7 +8,7 @@ const sendOrderProcessingMail = async ({
   processingDate,
 }) => {
   const html = generateEmailTemplate({
-    title: `Order Processing Started 🚀`,
+    title: `Order Processing Started`,
 
     message: `
       Dear ${customerName},<br/><br/>

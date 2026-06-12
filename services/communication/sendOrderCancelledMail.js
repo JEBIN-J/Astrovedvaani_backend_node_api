@@ -9,7 +9,7 @@ const sendOrderCancelledMail = async ({
   refundAmount,
 }) => {
   const html = generateEmailTemplate({
-    title: `Order Cancelled ❌`,
+    title: `Order Cancelled`,
 
     message: `
       Dear ${customerName},<br/><br/>
