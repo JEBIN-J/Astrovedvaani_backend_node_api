@@ -1125,6 +1125,7 @@ function handleChatRequestEvents(socketManager, socket) {
 
           const isAstrologer =
             userId.toString() === session.astrologer_user_id.toString();
+              console.log(`User ${userId} is ${isAstrologer ? "Astrologer" : "User"} for session ${sessionId}`);
           const statusReason = isAstrologer
             ? Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_ENDED
             : Enums.SERVICE.STATUS_REASON.COMPLETED.USER_ENDED;

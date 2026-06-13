@@ -166,8 +166,8 @@ class SocketManager {
             const isAstrologer =
               userId.toString() === session.astrologer_user_id.toString();
             const statusReason = isAstrologer
-              ? Enums.SERVICE.STATUS_REASON.COMPLETED.USER_NETWORK_ISSUE
-              : Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_NETWORK_ISSUE;
+              ? Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_NETWORK_ISSUE
+              : Enums.SERVICE.STATUS_REASON.COMPLETED.USER_NETWORK_ISSUE;
             await ConsultationSession.findByIdAndUpdate(
               sessionId,
               {
