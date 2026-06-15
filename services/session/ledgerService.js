@@ -176,7 +176,7 @@ async function createLedgerEntriesForSession(sessionId) {
 }
 async function finalizeSession(sessionId, endedBy, statusReason, forcedEndReason = null) {
   logger.info(
-    `[Session] Starting finalizeSession for sessionId=${sessionId}, endedBy=${endedBy}, forcedEndReason=${forcedEndReason}`,
+    `[Session] Starting finalizeSession for sessionId=${sessionId}, endedBy=${endedBy}, statusReason=${statusReason} forcedEndReason=${forcedEndReason}`,
   );
 
   if (!sessionId) {

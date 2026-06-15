@@ -247,6 +247,7 @@ class SocketManager {
                 const result = await finalizeSession(
                   sessionId,
                   session.user_id,
+                  statusReason,
                   "Auto-ended by system on disconnect",
                 );
                 if (!result.success)
