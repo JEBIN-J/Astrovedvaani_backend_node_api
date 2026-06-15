@@ -168,20 +168,20 @@ class SocketManager {
             const statusReason = isAstrologer
               ? Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_NETWORK_ISSUE
               : Enums.SERVICE.STATUS_REASON.COMPLETED.USER_NETWORK_ISSUE;
-            // await ConsultationSession.findByIdAndUpdate(
-            //   sessionId,
-            //   {
-            //     end_time: now,
-            //     completed_at: now,
-            //     forced_end_reason: `Participant ${userId} disconnected for too long`,
-            //     duration_minutes: billableMinutes,
-            //     total_amount: finalAmount,
-            //     payment_status: Enums.PAYMENT.STATUS.PAID,
-            //     status: Enums.SERVICE.STATUS.COMPLETED,
-            //     status_reason: statusReason,
-            //   },
-            //   { new: true },
-            // );
+            await ConsultationSession.findByIdAndUpdate(
+              sessionId,
+              {
+                end_time: now,
+                // completed_at: now,
+                // forced_end_reason: `Participant ${userId} disconnected for too long`,
+                // duration_minutes: billableMinutes,
+                // total_amount: finalAmount,
+                // payment_status: Enums.PAYMENT.STATUS.PAID,
+                // status: Enums.SERVICE.STATUS.COMPLETED,
+                // status_reason: statusReason,
+              },
+              { new: true },
+            );
             await clearSession(sessionId);
             this.clearActiveSession(
               session.user_id.toString(),
