@@ -250,6 +250,10 @@ class SocketManager {
                   statusReason,
                   "Auto-ended by system on disconnect",
                 );
+                console.log(
+                  `[Ledger] finalizeSession result for ${sessionId}:`,
+                  result,
+                );
                 if (!result.success)
                   logger.warn(
                     `[Ledger] Failed ledger for ${sessionId}: ${result.error}`,
