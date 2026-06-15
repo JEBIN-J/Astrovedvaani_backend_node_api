@@ -959,7 +959,7 @@ function handleChatRequestEvents(socketManager, socket) {
       const updatedSession = await ConsultationSession.findByIdAndUpdate(
         sessionId,
         {
-          status: Enums.SERVICE.STATUS.REJECTED,
+          status: Enums.SERVICE.STATUS.CANCELLED,
           status_reason:
             Enums.SERVICE.STATUS_REASON.CANCELLED.ASTROLOGER_REJECTED,
           rejection_reason: rejectionReason,
