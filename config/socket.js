@@ -168,6 +168,7 @@ class SocketManager {
             const statusReason = isAstrologer
               ? Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_NETWORK_ISSUE
               : Enums.SERVICE.STATUS_REASON.COMPLETED.USER_NETWORK_ISSUE;
+              const endTime = new Date() - 30 * 1000; // backdate by 30s to approximate disconnect time
             await ConsultationSession.findByIdAndUpdate(
               sessionId,
               {
