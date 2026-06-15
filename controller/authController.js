@@ -433,6 +433,9 @@ exports.logout = asyncHandler(async (req, res, next) => {
     const astrologerData = await Astrologer.findOne({ user_id: userId });
     if (astrologerData) {
       astrologerData.is_online = false;
+      astrologerData.isChat = false;
+      astrologerData.isCall = false;
+      astrologerData.isVideo = false;
       await astrologerData.save();
     }
     // Remove device from devices array
