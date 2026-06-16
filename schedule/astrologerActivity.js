@@ -1,11 +1,12 @@
 const Astrologer = require("../models/Astrologer");
 const AstrologerActivity = require("../models/AstrologerActivity");
 const cron = require("node-cron");
+const logger = require("../utils/logger");
 
 async function rolloverOnlineAstrologers() {
   try {
-    console.log(
-      "Starting astrologer activity rollover..."
+    logger.info(
+      "Starting astrologer activity rollover at 12:00 AM"
     );
 
     const now = new Date();
@@ -19,7 +20,7 @@ async function rolloverOnlineAstrologers() {
         is_online: true,
       }).select("_id");
 
-    console.log(
+    logger.info(
       `Found ${onlineAstrologers.length} online astrologers`
     );
 
@@ -41,7 +42,7 @@ async function rolloverOnlineAstrologers() {
           total_online_seconds: 0,
         });
 
-        console.log(
+        logger.info(
           `Created activity for astrologer ${astrologer._id}`
         );
 
@@ -62,16 +63,16 @@ async function rolloverOnlineAstrologers() {
 
       await activity.save();
 
-      console.log(
+      logger.info(
         `Rolled over astrologer ${astrologer._id} (${duration}s)`
       );
     }
 
-    console.log(
+    logger.info(
       "Astrologer activity rollover completed"
     );
   } catch (error) {
-    console.error(
+    logger.error(
       "Rollover Error:",
       error
     );
