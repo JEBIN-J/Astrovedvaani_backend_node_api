@@ -34,6 +34,10 @@ async function markAstrologerOnline(astrologerId) {
         upsert: true,
       }
     );
+
+    logger.info(
+      `[Activity] Astrologer ${astrologerId} marked online for date ${dateKey}`
+    );
   } catch (error) {
     logger.error(
       `[Activity] markAstrologerOnline failed`,
@@ -80,6 +84,10 @@ async function markAstrologerOffline(astrologerId) {
           total_online_seconds: duration,
         },
       }
+    );
+
+    logger.info(
+      `[Activity] Astrologer ${astrologerId} marked offline for date ${dateKey}, duration: ${duration}s`
     );
   } catch (error) {
     logger.error(
