@@ -54,10 +54,7 @@ exports.getProductById = async (
   const actualPrice = calculateWalletDeduction(uiPrice, gstPercent);
 
   product.actualPrice = Number(actualPrice.toFixed(2));
-
-  // =====================================
-  // APPLY COUPON IF PROVIDED
-  // =====================================
+  product.gst_amount = Number((uiPrice - actualPrice).toFixed(2));
 
   let couponDiscountAmount = 0;
 

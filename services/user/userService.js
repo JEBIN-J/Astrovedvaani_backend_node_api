@@ -1345,30 +1345,74 @@ exports.fetchAstrologerById = async (id, userId) => {
   try {
     const astrologer = await Astrologer.findById(id).lean();
     if (!astrologer) return null;
-    const [user, ranking, service_rates, followerCount] = await Promise.all([
-      User.findById(astrologer.user_id).lean(),
-      AstrologerRanking.findOne({ astrologer_id: id }).lean(),
-      AstrologerServiceRates.find({ astrologer_id: id }).lean(),
-      FollowRequest.countDocuments({
-        astrologer_id: id,
-        status: Enums.SERVICE.FOLLOW.ACCEPTED,
-      }),
-    ]);
+
+    const [user, ranking, service_rates, followerCount, offerDoc] =
+      await Promise.all([
+        User.findById(astrologer.user_id).lean(),
+        AstrologerRanking.findOne({ astrologer_id: id }).lean(),
+        AstrologerServiceRates.find({ astrologer_id: id }).lean(),
+        FollowRequest.countDocuments({
+          astrologer_id: id,
+          status: Enums.SERVICE.FOLLOW.ACCEPTED,
+        }),
+        AstrologerOfferSchema.findOne({ astrologer_id: id }).lean(),
+      ]);
+
     let isFollow = false;
+
     if (userId && mongoose.Types.ObjectId.isValid(userId)) {
       const follow = await FollowRequest.findOne({
         user_id: userId,
         astrologer_id: id,
         status: Enums.SERVICE.FOLLOW.ACCEPTED,
       }).lean();
+
       isFollow = !!follow;
     }
+
+    const now = new Date();
+
+    const updatedServiceRates = (service_rates || []).map((sr) => {
+      const matchedOffer = (offerDoc?.offers || []).find((offer) => {
+        if (!offer.is_active) return false;
+
+        if (offer.service_type !== sr.service_type) return false;
+
+        if (offer.start_time && new Date(offer.start_time) > now) return false;
+
+        if (offer.end_time && new Date(offer.end_time) <= now) return false;
+
+        return true;
+      });
+
+      let finalRate = sr.rate;
+      let isOfferApplied = false;
+
+      if (matchedOffer) {
+        isOfferApplied = true;
+
+        if (matchedOffer.discount_type === "PERCENTAGE") {
+          finalRate = Math.max(
+            0,
+            sr.rate - (sr.rate * matchedOffer.discount_value) / 100,
+          );
+        } else {
+          finalRate = Math.max(0, sr.rate - matchedOffer.discount_value);
+        }
+      }
+
+      return {
+        ...sr,
+        is_offer_applied: isOfferApplied,
+        final_rate: finalRate,
+      };
+    });
 
     return {
       ratings_avg: ranking?.ratings_avg || 0,
       astrologer,
       user,
-      service_rates,
+      service_rates: updatedServiceRates,
       isFollow,
       follower_count: followerCount,
     };
@@ -1402,7 +1446,6 @@ exports.getReviewsByAstrologerId = async (astrologerId, page, limit) => {
           options: { strictPopulate: false },
         })
         .lean(),
-
       Feedback.countDocuments(query),
       AstrologerRanking.findOne({ astrologer_id: astrologer._id }).lean(),
       Feedback.aggregate([
@@ -1418,14 +1461,8 @@ exports.getReviewsByAstrologerId = async (astrologerId, page, limit) => {
               },
             ],
             uniqueUserCount: [
-              {
-                $group: {
-                  _id: "$user_id",
-                },
-              },
-              {
-                $count: "totalUsers",
-              },
+              { $group: { _id: "$user_id" } },
+              { $count: "totalUsers" },
             ],
           },
         },
@@ -1438,18 +1475,18 @@ exports.getReviewsByAstrologerId = async (astrologerId, page, limit) => {
     }
     const totalPages = Math.ceil(totalDocs / limit);
     const statData = stats[0] || {};
-    const ratingBreakdown = {
-      1: 0,
-      2: 0,
-      3: 0,
-      4: 0,
-      5: 0,
-    };
+    const ratingBreakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     if (statData.ratingsCount) {
       statData.ratingsCount.forEach((item) => {
         ratingBreakdown[item._id] = item.count;
       });
     }
+    let avgRating =
+      reviews.length > 0
+        ? reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / reviews.length
+        : 0;
+    avgRating = Math.round(avgRating * 2) / 2;
+    avgRating = parseFloat(avgRating.toFixed(1));
     return {
       reviews,
       pagination: buildPaginationResponse({
@@ -1458,7 +1495,7 @@ exports.getReviewsByAstrologerId = async (astrologerId, page, limit) => {
         page,
         limit,
       }),
-      averageRating: rankingData?.ratings_avg || 0,
+      averageRating: avgRating,
       totalReviewers: totalDocs,
       ratingBreakdown,
     };
