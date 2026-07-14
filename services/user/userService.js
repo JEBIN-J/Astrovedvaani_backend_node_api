@@ -18,10 +18,12 @@ const {
 const Enums = require("../../utils/constants");
 const AstrologerOfferSchema = require("../../models/AstrologerOfferSchema");
 const redisClient = require("../../utils/redis/redisClient");
+const Wallet = require("../../models/Wallet");
 const { ASTROLOGERS_LIST } = CacheService.CACHE_PREFIXES;
 
+const WALLET_PROMO_THRESHOLD = 50; // Rs
 const ASTRO_BUSY_PREFIX = "astro:busy:";
-
+const Promotion = require("../../models/AstrologerPromotion");
 function getServicePriority(astrologer) {
   const chat = astrologer.isChat ? 4 : 0;
 
@@ -96,763 +98,6 @@ async function getBusyAstrologersMap(astrologerUserIds = []) {
   }
 }
 
-// exports.fetchAstrologers = async ({
-//   limit = 20,
-//   cursor = null,
-//   filters = {},
-//   sortPrice,
-//   sortExperience,
-//   sortRating,
-//   gender,
-//   userId,
-//   search,
-// }) => {
-//   try {
-//     let serviceTypeFilter = filters["service_rates.service_type"];
-
-//     let isFreeFilter = undefined;
-
-//     const rankingFilters = {};
-
-//     const astrologerMatchFilters = {};
-
-//     Object.entries(filters).forEach(([key, value]) => {
-//       if (key === "service_rates.service_type") {
-//         serviceTypeFilter = value;
-//       } else if (key === "is_free") {
-//         isFreeFilter = value;
-//       } else if (key.startsWith("astrologer.")) {
-//         astrologerMatchFilters[key.replace("astrologer.", "")] = value;
-//       } else {
-//         rankingFilters[key] = value;
-//       }
-//     });
-
-//     const aggregationPipeline = [];
-
-//     aggregationPipeline.push(
-//       {
-//         $match: rankingFilters,
-//       },
-
-//       {
-//         $lookup: {
-//           from: "astrologers",
-//           localField: "astrologer_id",
-//           foreignField: "_id",
-//           as: "astrologer",
-//         },
-//       },
-
-//       {
-//         $unwind: "$astrologer",
-//       },
-
-//       ...(Object.keys(astrologerMatchFilters).length
-//         ? [
-//             {
-//               $match: Object.fromEntries(
-//                 Object.entries(astrologerMatchFilters).map(([k, v]) => [
-//                   `astrologer.${k}`,
-//                   v,
-//                 ]),
-//               ),
-//             },
-//           ]
-//         : []),
-
-//       {
-//         $lookup: {
-//           from: "users",
-//           localField: "astrologer.user_id",
-//           foreignField: "_id",
-//           as: "user",
-//         },
-//       },
-
-//       {
-//         $unwind: {
-//           path: "$user",
-//           preserveNullAndEmptyArrays: true,
-//         },
-//       },
-
-//       {
-//         $match: {
-//           "user.isDeleted": false,
-
-//           "user.verificationStatus": Enums.USER.VERIFICATION_STATUS.APPROVED,
-//         },
-//       },
-
-//       ...(gender
-//         ? [
-//             {
-//               $match: {
-//                 "user.gender": parseInt(gender),
-//               },
-//             },
-//           ]
-//         : []),
-
-//       {
-//         $lookup: {
-//           from: "astrologerservicerates",
-//           localField: "astrologer._id",
-//           foreignField: "astrologer_id",
-//           as: "service_rates",
-//         },
-//       },
-
-//       {
-//         $match: {
-//           service_rates: {
-//             $ne: [],
-//             $exists: true,
-//           },
-//         },
-//       },
-
-//       ...(serviceTypeFilter !== null
-//         ? [
-//             {
-//               $match: {
-//                 service_rates: {
-//                   $elemMatch: {
-//                     service_type: serviceTypeFilter,
-//                   },
-//                 },
-//               },
-//             },
-//           ]
-//         : []),
-
-//       {
-//         $lookup: {
-//           from: "consultationsessions",
-//           localField: "astrologer.user_id",
-//           foreignField: "astrologer_user_id",
-//           as: "sessions",
-//         },
-//       },
-
-//       ...(isFreeFilter !== undefined
-//         ? [
-//             {
-//               $match: {
-//                 "sessions.is_free": isFreeFilter,
-//               },
-//             },
-//           ]
-//         : []),
-//     );
-
-//     // SEARCH
-
-//     if (search) {
-//       aggregationPipeline.push({
-//         $match: {
-//           $or: [
-//             {
-//               "astrologer.display_name": {
-//                 $regex: search,
-//                 $options: "i",
-//               },
-//             },
-
-//             {
-//               "user.name": {
-//                 $regex: search,
-//                 $options: "i",
-//               },
-//             },
-
-//             {
-//               "astrologer.bio": {
-//                 $regex: search,
-//                 $options: "i",
-//               },
-//             },
-//           ],
-//         },
-//       });
-//     }
-
-//     aggregationPipeline.push({
-//       $project: {
-//         _id: 1,
-
-//         ratings_avg: 1,
-
-//         score: 1,
-
-//         astrologer: {
-//           $mergeObjects: [
-//             "$astrologer",
-
-//             {
-//               display_name: {
-//                 $ifNull: ["$astrologer.display_name", "$user.name"],
-//               },
-
-//               profilePicture: {
-//                 $ifNull: ["$user.profilePicture", null],
-//               },
-//             },
-//           ],
-//         },
-
-//         user: 1,
-
-//         service_rates: 1,
-//       },
-//     });
-
-//     // FETCH EXTRA FOR REDIS SORTING
-
-//     aggregationPipeline.push({
-//       $limit: 500,
-//     });
-
-//     const result = await AstrologerRanking.aggregate(aggregationPipeline);
-
-//     // REDIS BULK FETCH
-
-//     const astrologerUserIds = result.map((r) =>
-//       r.astrologer.user_id.toString(),
-//     );
-
-//     const busyMap = await getBusyAstrologersMap(astrologerUserIds);
-
-//     console.log("Busy Map:", busyMap);
-
-//     let formattedData = result.map((r) => {
-//       const isBusy = busyMap.get(r.astrologer.user_id.toString());
-
-//       console.log(`Astrologer ${r.astrologer._id} busy status:`, isBusy);
-
-//       const astrologerData = {
-//         ...r.astrologer,
-
-//         is_busy: isBusy,
-
-//         services: {
-//           chat: r.astrologer.isChat || false,
-
-//           call: r.astrologer.isCall || false,
-
-//           video: r.astrologer.isVideo || false,
-//         },
-//       };
-
-//       return {
-//         _id: r._id,
-
-//         ratings_avg: r.ratings_avg || 0,
-
-//         astrologer: astrologerData,
-
-//         user: r.user || null,
-
-//         service_rates: r.service_rates || [],
-
-//         score: r.score || 0,
-
-//         online_priority: getOnlinePriority(astrologerData),
-
-//         service_priority: getServicePriority(astrologerData),
-//       };
-//     });
-
-//     console.log("Formatted Data Sample:", formattedData[0]);
-
-//     // FILTER BUSY
-
-//     if (filters["astrologer.is_busy"] !== undefined) {
-//       formattedData = formattedData.filter(
-//         (item) => item.astrologer.is_busy === filters["astrologer.is_busy"],
-//       );
-//     }
-
-//     // FINAL SORT
-
-//     formattedData.sort((a, b) => {
-//       // ONLINE > BUSY > OFFLINE
-
-//       if (b.online_priority !== a.online_priority) {
-//         return b.online_priority - a.online_priority;
-//       }
-
-//       // SERVICES
-
-//       if (b.service_priority !== a.service_priority) {
-//         return b.service_priority - a.service_priority;
-//       }
-
-//       // PREMIUM
-
-//       if (b.astrologer.is_premium !== a.astrologer.is_premium) {
-//         return (
-//           Number(b.astrologer.is_premium) - Number(a.astrologer.is_premium)
-//         );
-//       }
-
-//       // RATING
-
-//       if (b.ratings_avg !== a.ratings_avg) {
-//         return b.ratings_avg - a.ratings_avg;
-//       }
-
-//       // SCORE
-
-//       if (b.score !== a.score) {
-//         return b.score - a.score;
-//       }
-
-//       return String(a._id).localeCompare(String(b._id));
-//     });
-
-//     // CURSOR FILTER
-
-//     if (cursor) {
-//       const decoded = decodeCursor(cursor);
-
-//       if (decoded) {
-//         formattedData = formattedData.filter((item) => {
-//           if (item.online_priority < decoded.online_priority) return true;
-
-//           if (
-//             item.online_priority === decoded.online_priority &&
-//             item.service_priority < decoded.service_priority
-//           )
-//             return true;
-
-//           if (
-//             item.online_priority === decoded.online_priority &&
-//             item.service_priority === decoded.service_priority &&
-//             item.score < decoded.score
-//           )
-//             return true;
-
-//           if (
-//             item.online_priority === decoded.online_priority &&
-//             item.service_priority === decoded.service_priority &&
-//             item.score === decoded.score &&
-//             String(item._id) > String(decoded._id)
-//           )
-//             return true;
-
-//           return false;
-//         });
-//       }
-//     }
-
-//     // FINAL PAGINATION
-
-//     const paginatedData = formattedData.slice(0, limit);
-
-//     console.log("Paginated Data", paginatedData);
-
-//     const hasMore = formattedData.length > limit;
-
-//     const nextCursor =
-//       hasMore && paginatedData.length
-//         ? encodeCursor(paginatedData[paginatedData.length - 1])
-//         : null;
-
-//     // FOLLOW INFO
-
-//     if (userId) {
-//       const astroIds = paginatedData.map((r) => r.astrologer._id);
-
-//       const follows = await FollowRequest.find({
-//         user_id: userId,
-
-//         astrologer_id: {
-//           $in: astroIds,
-//         },
-//       }).select("astrologer_id");
-
-//       const followedSet = new Set(
-//         follows.map((f) => f.astrologer_id.toString()),
-//       );
-
-//       paginatedData.forEach((item) => {
-//         item.isFollow = followedSet.has(item.astrologer._id.toString());
-//       });
-//     } else {
-//       paginatedData.forEach((item) => {
-//         item.isFollow = false;
-//       });
-//     }
-
-//     return {
-//       data: paginatedData,
-
-//       pagination: {
-//         hasMore,
-//         nextCursor,
-//       },
-//     };
-//   } catch (err) {
-//     logger.error(`Error fetching astrologers: ${err.message}`);
-
-//     return {
-//       data: [],
-
-//       pagination: {
-//         hasMore: false,
-//         nextCursor: null,
-//       },
-//     };
-//   }
-// };
-
-// exports.fetchAstrologers = async ({
-//   limit = 20,
-//   cursor = null,
-//   filters = {},
-//   sortPrice,
-//   sortExperience,
-//   sortRating,
-//   gender,
-//   userId,
-//   search,
-// }) => {
-//   try {
-//     logger.info(
-//       `fetchAstrologers called with params limit=${limit}, cursor=${cursor}, filters=${JSON.stringify(
-//         filters,
-//       )}, sortPrice=${sortPrice}, sortExperience=${sortExperience}, sortRating=${sortRating}, gender=${gender}, userId=${userId}, search=${search}`,
-//     );
-
-//     const isCacheable =
-//       !cursor &&
-//       !filters?.["astrologer.is_online"] &&
-//       !filters?.["astrologer.is_busy"] &&
-//       !filters?.["astrologer.is_premium"] &&
-//       !filters?.["is_free"] &&
-//       !gender &&
-//       !search;
-
-//     logger.info(`isCacheable=${isCacheable}`);
-
-//     const cacheKey = isCacheable
-//       ? CacheService.generateKey(
-//           ASTROLOGERS_LIST,
-//           limit,
-//           sortPrice || "",
-//           sortExperience || "",
-//           sortRating || "",
-//           JSON.stringify(filters),
-//         )
-//       : null;
-
-//     if (isCacheable) {
-//       const cachedData = await CacheService.get(cacheKey);
-//       if (cachedData) {
-//         logger.info(`Returning cached astrologers for key=${cacheKey}`);
-//         return cachedData;
-//       }
-//     }
-
-//     const DEFAULT_SERVICE_TYPE = Enums.SERVICE.TYPE.CHAT;
-//     if (!filters["service_rates.service_type"]) {
-//       filters["service_rates.service_type"] = DEFAULT_SERVICE_TYPE;
-//     }
-
-//     let serviceTypeFilter = filters["service_rates.service_type"];
-//     let isFreeFilter = undefined;
-//     const rankingFilters = {};
-//     const astrologerMatchFilters = {};
-
-//     Object.entries(filters).forEach(([key, value]) => {
-//       if (key === "service_rates.service_type") {
-//         serviceTypeFilter = value;
-//       } else if (key === "is_free") {
-//         isFreeFilter = value;
-//       } else if (key.startsWith("astrologer.")) {
-//         astrologerMatchFilters[key.replace("astrologer.", "")] = value;
-//       } else {
-//         rankingFilters[key] = value;
-//       }
-//     });
-
-//     logger.info(`rankingFilters=${JSON.stringify(rankingFilters)}`);
-//     logger.info(
-//       `astrologerMatchFilters=${JSON.stringify(astrologerMatchFilters)}`,
-//     );
-
-//     const aggregationPipeline = [];
-
-//     if (cursor && !sortPrice && !sortExperience) {
-//       const cursorDoc = await AstrologerRanking.findById(cursor).select({
-//         score: 1,
-//       });
-//       logger.info(`cursorDoc=${JSON.stringify(cursorDoc)}`);
-//       if (cursorDoc) {
-//         aggregationPipeline.push({
-//           $match: {
-//             $or: [
-//               { score: { $lt: cursorDoc.score } },
-//               {
-//                 score: cursorDoc.score,
-//                 _id: { $gt: new mongoose.Types.ObjectId(cursor) },
-//               },
-//             ],
-//           },
-//         });
-//       }
-//     }
-
-//     aggregationPipeline.push(
-//       { $match: rankingFilters },
-//       {
-//         $lookup: {
-//           from: "astrologers",
-//           localField: "astrologer_id",
-//           foreignField: "_id",
-//           as: "astrologer",
-//         },
-//       },
-//       { $unwind: "$astrologer" },
-//       ...(Object.keys(astrologerMatchFilters).length
-//         ? [
-//             {
-//               $match: Object.fromEntries(
-//                 Object.entries(astrologerMatchFilters).map(([k, v]) => [
-//                   `astrologer.${k}`,
-//                   v,
-//                 ]),
-//               ),
-//             },
-//           ]
-//         : []),
-//       {
-//         $lookup: {
-//           from: "users",
-//           localField: "astrologer.user_id",
-//           foreignField: "_id",
-//           as: "user",
-//         },
-//       },
-//       { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
-//       {
-//         $match: {
-//           "user.isDeleted": false,
-//           "user.verificationStatus": Enums.USER.VERIFICATION_STATUS.APPROVED,
-//         },
-//       },
-//       ...(gender ? [{ $match: { "user.gender": parseInt(gender) } }] : []),
-//       {
-//         $lookup: {
-//           from: "astrologerservicerates",
-//           localField: "astrologer._id",
-//           foreignField: "astrologer_id",
-//           as: "service_rates",
-//         },
-//       },
-//       { $match: { service_rates: { $ne: [], $exists: true } } },
-//       ...(serviceTypeFilter !== null
-//         ? [
-//             {
-//               $match: {
-//                 service_rates: {
-//                   $elemMatch: { service_type: serviceTypeFilter },
-//                 },
-//               },
-//             },
-//           ]
-//         : []),
-//       {
-//         $lookup: {
-//           from: "consultationsessions",
-//           localField: "astrologer.user_id",
-//           foreignField: "astrologer_user_id",
-//           as: "sessions",
-//         },
-//       },
-//       ...(isFreeFilter !== undefined
-//         ? [{ $match: { "sessions.is_free": isFreeFilter } }]
-//         : []),
-//     );
-
-//     if (search) {
-//       const searchConditions = [
-//         { "astrologer.display_name": { $regex: search, $options: "i" } },
-//         { "user.name": { $regex: search, $options: "i" } },
-//         { "astrologer.bio": { $regex: search, $options: "i" } },
-//         { "astrologer.specializations": { $regex: search, $options: "i" } },
-//         {
-//           "astrologer.languages_spoken": {
-//             $elemMatch: { $regex: search, $options: "i" },
-//           },
-//         },
-//       ];
-//       aggregationPipeline.push({ $match: { $or: searchConditions } });
-//       logger.info(`Search conditions=${JSON.stringify(searchConditions)}`);
-//     }
-
-//     aggregationPipeline.push({
-//       $project: {
-//         _id: 1,
-//         ratings_avg: 1,
-//         astrologer: {
-//           $mergeObjects: [
-//             "$astrologer",
-//             {
-//               display_name: {
-//                 $ifNull: ["$astrologer.display_name", "$user.name"],
-//               },
-//               profilePicture: { $ifNull: ["$user.profilePicture", null] },
-//             },
-//           ],
-//         },
-//         user: 1,
-//         service_rates: 1,
-//         score: 1,
-//       },
-//     });
-
-//     // ── online-order field (added only for sorting, not exposed in response) ──
-//     aggregationPipeline.push({
-//       $addFields: {
-//         _onlineOrder: {
-//           $switch: {
-//             branches: [
-//               {
-//                 case: {
-//                   $and: [
-//                     { $eq: ["$astrologer.is_online", true] },
-//                     { $ne: ["$astrologer.is_busy", true] },
-//                   ],
-//                 },
-//                 then: 0,
-//               },
-//               {
-//                 case: {
-//                   $and: [
-//                     { $eq: ["$astrologer.is_online", true] },
-//                     { $eq: ["$astrologer.is_busy", true] },
-//                   ],
-//                 },
-//                 then: 1, // online + busy
-//               },
-//             ],
-//             default: 2, // offline (is_busy value doesn't matter)
-//           },
-//         },
-//       },
-//     });
-
-//     if (sortPrice) {
-//       const sortOrder = sortPrice === "asc" ? 1 : -1;
-//       aggregationPipeline.push({
-//         $addFields: {
-//           target_rate: {
-//             $arrayElemAt: [
-//               {
-//                 $filter: {
-//                   input: "$service_rates",
-//                   as: "rate",
-//                   cond: { $eq: ["$$rate.service_type", serviceTypeFilter] },
-//                 },
-//               },
-//               0,
-//             ],
-//           },
-//         },
-//       });
-//       aggregationPipeline.push({
-//         $sort: { _onlineOrder: 1, "target_rate.rate": sortOrder },
-//       });
-//     } else if (sortExperience) {
-//       aggregationPipeline.push({
-//         $sort: {
-//           _onlineOrder: 1,
-//           "astrologer.experience_years": sortExperience === "asc" ? 1 : -1,
-//         },
-//       });
-//     } else if (sortRating) {
-//       aggregationPipeline.push({
-//         $sort: { _onlineOrder: 1, ratings_avg: sortRating === "asc" ? 1 : -1 },
-//       });
-//     } else {
-//       aggregationPipeline.push({
-//         $sort: { _onlineOrder: 1, score: -1, _id: 1 },
-//       });
-//     }
-
-//     aggregationPipeline.push({ $limit: limit + 1 });
-
-//     const result = await AstrologerRanking.aggregate(aggregationPipeline);
-
-//     const hasMore = result.length > limit;
-//     const data = hasMore ? result.slice(0, -1) : result;
-
-//     const formattedData = data.map((r) => ({
-//       _id: r._id,
-//       ratings_avg: r.ratings_avg || 0,
-//       astrologer: {
-//         ...r.astrologer,
-//         display_name: r.astrologer.display_name || r.user?.name || "Astrologer",
-//         profilePicture:
-//           r.astrologer.profilePicture || r.user?.profilePicture || null,
-//         bio: r.astrologer.bio || "",
-//         languages_spoken: r.astrologer.languages_spoken || [],
-//         specializations: r.astrologer.specializations || [],
-//         experience_years: r.astrologer.experience_years || 0,
-//         is_online: r.astrologer.is_online || false,
-//         is_premium: r.astrologer.is_premium || false,
-//         is_busy: r.astrologer.is_busy || false,
-//         services: {
-//           chat: r.astrologer.isChat || false,
-//           call: r.astrologer.isCall || false,
-//           video: r.astrologer.isVideo || false,
-//         },
-//       },
-//       user: r.user || null,
-//       service_rates: r.service_rates || [],
-//     }));
-
-//     if (userId) {
-//       const astroIds = formattedData.map((r) => r.astrologer._id);
-//       const follows = await FollowRequest.find({
-//         user_id: userId,
-//         astrologer_id: { $in: astroIds },
-//       }).select("astrologer_id");
-//       const followedSet = new Set(
-//         follows.map((f) => f.astrologer_id.toString()),
-//       );
-//       formattedData.forEach((item) => {
-//         item.isFollow = followedSet.has(item.astrologer._id.toString());
-//       });
-//     } else {
-//       formattedData.forEach((item) => {
-//         item.isFollow = false;
-//       });
-//     }
-
-//     const nextCursor =
-//       formattedData.length > 0
-//         ? formattedData[formattedData.length - 1]._id
-//         : null;
-//     const response = {
-//       data: formattedData,
-//       pagination: { hasMore, nextCursor },
-//     };
-
-//     if (isCacheable) {
-//       await CacheService.set(cacheKey, response, CacheService.TTL.ASTROLOGER);
-//     }
-
-//     return response;
-//   } catch (err) {
-//     logger.error(`Error fetching ranked astrologers: ${err.message}`);
-//     return { data: [], pagination: { hasMore: false, nextCursor: null } };
-//   }
-// };
-
 exports.fetchAstrologers = async ({
   limit = 20,
   cursor = null,
@@ -871,6 +116,31 @@ exports.fetchAstrologers = async ({
       )}, sortPrice=${sortPrice}, sortExperience=${sortExperience}, sortRating=${sortRating}, gender=${gender}, userId=${userId}, search=${search}`,
     );
 
+    // ── Decide whether promotion data should be attached for this caller ──
+    // No userId (no token, e.g. home page) => always attach promotion (if valid).
+    // userId present => attach only if wallet balance <= threshold.
+    let showPromotions = true;
+
+    if (userId) {
+      const user = await User.findById(userId)
+        .select("promotionalSessionUsed")
+        .lean();
+
+      if (!user) {
+        showPromotions = false;
+      } else if (user.promotionalSessionUsed) {
+        showPromotions = false;
+      } else {
+        const wallet = await Wallet.findOne({
+          user_id: userId,
+        }).select("balance");
+
+        const balance = wallet?.balance || 0;
+
+        showPromotions = balance <= WALLET_PROMO_THRESHOLD;
+      }
+    }
+
     const isCacheable =
       !cursor &&
       !filters?.["astrologer.is_online"] &&
@@ -878,7 +148,8 @@ exports.fetchAstrologers = async ({
       !filters?.["astrologer.is_premium"] &&
       !filters?.["is_free"] &&
       !gender &&
-      !search;
+      !search &&
+      !userId; // promotion visibility depends on per-user wallet, so skip cache when userId is present
 
     logger.info(`isCacheable=${isCacheable}`);
 
@@ -1035,7 +306,7 @@ exports.fetchAstrologers = async ({
         $unwind: { path: "$offer_doc", preserveNullAndEmptyArrays: true },
       },
 
-      // ── Merge offer data into each service_rate entry ──
+      // ── Merge offer data into each service_rate entry ── (UNCHANGED — exactly as before)
       {
         $addFields: {
           service_rates: {
@@ -1157,6 +428,51 @@ exports.fetchAstrologers = async ({
           },
         },
       },
+
+      // ── NEW: Lookup PROMOTION data separately — does NOT touch service_rates ──
+      // If expired / inactive / not-yet-started -> no match -> promotion_doc stays empty
+      // -> astrologer STILL appears in listing with normal service_rates -> promotion: null
+      ...(showPromotions
+        ? [
+            {
+              $lookup: {
+                from: "promotions",
+                let: { astrologerId: "$astrologer._id" },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $in: ["$$astrologerId", "$astrologers"] },
+                          { $eq: ["$isActive", true] },
+                          { $lte: ["$startDate", now] },
+                          { $gte: ["$endDate", now] }, // <-- expired promos are excluded here
+                        ],
+                      },
+                    },
+                  },
+                  { $limit: 1 },
+                  {
+                    $project: {
+                      _id: 1,
+                      title: 1,
+                      services: 1,
+                      startDate: 1,
+                      endDate: 1,
+                    },
+                  },
+                ],
+                as: "promotion_doc",
+              },
+            },
+            {
+              $unwind: {
+                path: "$promotion_doc",
+                preserveNullAndEmptyArrays: true, // <-- keeps astrologer in pipeline even if no promo matched
+              },
+            },
+          ]
+        : []),
     );
 
     if (search) {
@@ -1191,8 +507,9 @@ exports.fetchAstrologers = async ({
           ],
         },
         user: 1,
-        service_rates: 1,
+        service_rates: 1, // ← unchanged, exactly as before
         score: 1,
+        promotion_doc: 1, // ← new; will simply be undefined if no valid promo (e.g. expired)
       },
     });
 
@@ -1295,12 +612,23 @@ exports.fetchAstrologers = async ({
         },
       },
       user: r.user || null,
-      // is_offer_applied & final_rate already embedded by the $addFields stage
+      // is_offer_applied & final_rate — untouched, exactly as before
       service_rates: (r.service_rates || []).map((sr) => ({
         ...sr,
         is_offer_applied: sr.is_offer_applied ?? false,
         final_rate: sr.final_rate ?? sr.rate,
       })),
+      // ── NEW separate key — promotion data lives only here ──
+      // null when: expired, inactive, not-yet-started, or wallet balance > threshold, or nothing configured
+      promotion: r.promotion_doc
+        ? {
+            _id: r.promotion_doc._id,
+            title: r.promotion_doc.title,
+            startDate: r.promotion_doc.startDate,
+            endDate: r.promotion_doc.endDate,
+            services: r.promotion_doc.services || [],
+          }
+        : null,
     }));
 
     if (userId) {
@@ -1408,6 +736,56 @@ exports.fetchAstrologerById = async (id, userId) => {
       };
     });
 
+    // ── Decide whether promotion data should be attached for this caller ──
+    // No userId (no token) => always attach promotion (if valid).
+    // userId present => attach only if promotionalSessionUsed is false AND wallet balance <= threshold.
+    let showPromotions = true;
+
+    if (userId) {
+      const userDoc = await User.findById(userId)
+        .select("promotionalSessionUsed")
+        .lean();
+
+      if (!userDoc) {
+        showPromotions = false;
+      } else if (userDoc.promotionalSessionUsed) {
+        showPromotions = false;
+      } else {
+        const wallet = await Wallet.findOne({
+          user_id: userId,
+        }).select("balance");
+
+        const balance = wallet?.balance || 0;
+
+        showPromotions = balance <= WALLET_PROMO_THRESHOLD;
+      }
+    }
+
+    // ── Fetch promotion data only if showPromotions is true ──
+    // If expired / inactive / not-yet-started -> no match -> promotion stays null
+    let promotion = null;
+
+    if (showPromotions) {
+      const promotionDoc = await Promotion.findOne({
+        astrologers: astrologer._id,
+        isActive: true,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+      })
+        .select("_id title services startDate endDate")
+        .lean();
+
+      if (promotionDoc) {
+        promotion = {
+          _id: promotionDoc._id,
+          title: promotionDoc.title,
+          startDate: promotionDoc.startDate,
+          endDate: promotionDoc.endDate,
+          services: promotionDoc.services || [],
+        };
+      }
+    }
+
     return {
       ratings_avg: ranking?.ratings_avg || 0,
       astrologer,
@@ -1415,6 +793,7 @@ exports.fetchAstrologerById = async (id, userId) => {
       service_rates: updatedServiceRates,
       isFollow,
       follower_count: followerCount,
+      promotion, // ← new; null when expired/inactive/not-yet-started/wallet-above-threshold/session-used
     };
   } catch (err) {
     logger.error("Error in fetchAstrologerById:", err);

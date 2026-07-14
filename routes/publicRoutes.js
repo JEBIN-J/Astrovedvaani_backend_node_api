@@ -18,11 +18,25 @@ const {
 const MediaContentController = require("../controller/admin/mediaContentController");
 const metaSeoController = require("../controller/admin/metaSeoController");
 const traditionController = require("../controller/user/traditionController");
+const authKundliMiddleware = require("../middlewares/authkundliMiddlware");
 router.get("/fetch-static-pages", contentController.getStaticPage);
-router.get("/fetch-carousel", contentController.getBanners);
+router.get(
+  "/fetch-carousel",
+  authKundliMiddleware,
+  contentController.getBanners,
+);
+router.get(
+  "/prioritized-astrologers",
+  authKundliMiddleware,
+  fetchAllPrioritizedAstrologers,
+);
 router.get("/fetch-testimonials", contentController.getAllTestimonials);
 router.get("/fetch-faqs", contentController.getAllFAQs);
-router.get("/fetch-astrologers", userController.getAstrologers);
+router.get(
+  "/fetch-astrologers",
+  authKundliMiddleware,
+  userController.getAstrologers,
+);
 router.get("/blog/fetch-all", blogController.getBlogs);
 router.get("/blog/fetch-by-slug", blogController.getBlog);
 router.get("/pooja/fetch-all", poojaController.getAllPoojas);
@@ -48,7 +62,7 @@ router.get(
 );
 router.get("/astro-mall/products/search", productController.searchProducts);
 router.get("/global-search", userController.globalSearch);
-router.get("/prioritized-astrologers", fetchAllPrioritizedAstrologers);
+
 router.get("/meta/fetch-all", metaSeoController.getMetaList);
 
 router.get("/media-content/fetch-all", MediaContentController.getAllMedia);

@@ -52,7 +52,7 @@ const generateAuthTokens = (user, deviceId, onlyAccessToken = false) => {
   return { accessToken, refreshToken };
 };
 const TEST_NUMBERS = {
-  "+911234567890": "999999",
+  "+911234567890": "1234",
   "+919876543210": "1111",
   "+919999999999": "9999",
   "+918888888888": "8888",

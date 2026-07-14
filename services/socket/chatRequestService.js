@@ -420,7 +420,8 @@ function handleChatRequestEvents(socketManager, socket) {
           );
           await clearSession(sessionId);
           await clearInSession(sessionId);
-          const statusReason = Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
+          const statusReason =
+            Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
           const result = await finalizeSession(
             sessionId,
             userId,
@@ -802,7 +803,8 @@ function handleChatRequestEvents(socketManager, socket) {
 
           await clearInSession(sessionId);
 
-          const statusReason = Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
+          const statusReason =
+            Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
 
           const result = await finalizeSession(
             sessionId,
@@ -1125,7 +1127,9 @@ function handleChatRequestEvents(socketManager, socket) {
 
           const isAstrologer =
             userId.toString() === session.astrologer_user_id.toString();
-              console.log(`User ${userId} is ${isAstrologer ? "Astrologer" : "User"} for session ${sessionId}`);
+          console.log(
+            `User ${userId} is ${isAstrologer ? "Astrologer" : "User"} for session ${sessionId}`,
+          );
           const statusReason = isAstrologer
             ? Enums.SERVICE.STATUS_REASON.COMPLETED.ASTROLOGER_ENDED
             : Enums.SERVICE.STATUS_REASON.COMPLETED.USER_ENDED;

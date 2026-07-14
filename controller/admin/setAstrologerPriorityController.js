@@ -85,7 +85,10 @@ exports.fetchAllPrioritizedAstrologers = async (req, res) => {
       search,
     } = req.query;
 
+    // req.user is undefined when there's no token (e.g. public home page).
     const userId = req.user?._id || null;
+    const role = req.user?.role || null; // ← NEW: needed for SUPER_ADMIN bypass
+
     const parsedLimit = Math.min(Number(limit), 50);
 
     if (isNaN(parsedLimit)) {
@@ -135,6 +138,7 @@ exports.fetchAllPrioritizedAstrologers = async (req, res) => {
       gender,
       search,
       userId,
+      role, // ← NEW: passed through so the service can apply SUPER_ADMIN bypass
       targetServiceType,
     });
 
@@ -202,6 +206,8 @@ exports.fetchAllPrioritizedAstrologers = async (req, res) => {
             languages_spoken: languagesPop,
             is_busy: isBusy,
           },
+          // promotion key already attached by service.fetchAll — passed through as-is
+          promotion: astro.promotion,
         };
       }),
     );

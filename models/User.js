@@ -66,6 +66,13 @@ const userSchema = new Schema(
     lastFreeSessionUsedAt: {
       type: Date,
     },
+    promotionalSessionUsed: {
+      type: Boolean,
+      default: false,
+    },
+    lastPromotionalSessionUsedAt: {
+      type: Date,
+    },
     lastLogin: Date,
     fcmToken: { type: String, default: null },
     devices: [
@@ -137,12 +144,12 @@ const userSchema = new Schema(
       tag: {
         type: Number,
         enum: Object.values(Enums.USER.TAGS),
-        default: Enums.USER.TAGS.NEW_USER
+        default: Enums.USER.TAGS.NEW_USER,
       },
       assignedAt: {
         type: Date,
-        default: Date.now
-      }
+        default: Date.now,
+      },
     },
 
     userTags: [
@@ -150,22 +157,21 @@ const userSchema = new Schema(
         tag: {
           type: Number,
           enum: Object.values(Enums.USER.TAGS),
-          required: true
+          required: true,
         },
         source: {
           type: Number,
           enum: Object.values(Enums.USER.TAG_SOURCE),
-          default: Enums.USER.TAG_SOURCE.SYSTEM
+          default: Enums.USER.TAG_SOURCE.SYSTEM,
         },
         assignedAt: {
           type: Date,
-          default: Date.now
+          default: Date.now,
         },
         expiresAt: Date,
-        metadata: Schema.Types.Mixed
-      }
-    ]
-
+        metadata: Schema.Types.Mixed,
+      },
+    ],
   },
   {
     timestamps: true,

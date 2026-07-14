@@ -6,8 +6,20 @@ const Enums = require("../../utils/constants");
 const MAX_CHUNK_SIZE = 1024 * 1024; // 1 MB per chunk
 const Testimonial = require("../../models/Testimonial");
 const logger = require("../../utils/logger");
+
+const Wallet = require("../../models/Wallet");
+
 exports.createCarouselBannerService = async (data, user) => {
-  const { imageUrl, position, bannerType, redirectId, slug } = data;
+  const {
+    imageUrl,
+    position,
+    bannerType,
+    redirectId,
+    slug,
+    isPromotional,
+    startDate,
+    endDate,
+  } = data;
 
   if (!imageUrl || position === undefined) {
     throw new BadRequestError("imageUrl and position are required");
@@ -29,6 +41,29 @@ exports.createCarouselBannerService = async (data, user) => {
     }
   }
 
+  // ── Promotional type + date-range validation ──
+  let finalStartDate = null;
+  let finalEndDate = null;
+
+  if (isPromotional === true) {
+    if (!startDate || !endDate) {
+      throw new BadRequestError(
+        "startDate and endDate are required when isPromotional is true",
+      );
+    }
+
+    finalStartDate = new Date(startDate);
+    finalEndDate = new Date(endDate);
+
+    if (isNaN(finalStartDate.getTime()) || isNaN(finalEndDate.getTime())) {
+      throw new BadRequestError("startDate/endDate must be valid dates");
+    }
+
+    if (finalStartDate >= finalEndDate) {
+      throw new BadRequestError("endDate must be after startDate");
+    }
+  }
+
   const banner = new CarouselBanner({
     title: data.title || "",
     imageUrl,
@@ -36,13 +71,35 @@ exports.createCarouselBannerService = async (data, user) => {
     bannerType: bannerType ?? null,
     redirectId: redirectId ?? null,
     slug: slug ?? null,
+    isPromotional: isPromotional === true,
+    startDate: finalStartDate,
+    endDate: finalEndDate,
     createdBy: user._id,
   });
 
   return await banner.save();
 };
+const ADMIN_ROLES = [Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN];
+exports.getCarouselBannersService = async (
+  filters,
+  page = 1,
+  limit = 10,
+  user = null,
+) => {
+  const role = user?.role;
 
-exports.getCarouselBannersService = async (filters, page = 1, limit = 10) => {
+  const isAdminOrNoToken = !user || ADMIN_ROLES.includes(role);
+
+  let walletBalance = 0;
+
+  if (!isAdminOrNoToken) {
+    const wallet = await Wallet.findOne({
+      user_id: user._id,
+    }).lean();
+
+    walletBalance = wallet?.balance || 0;
+  }
+
   const query = {};
 
   if (filters.isActive !== undefined) {
@@ -61,19 +118,72 @@ exports.getCarouselBannersService = async (filters, page = 1, limit = 10) => {
     query.slug = filters.slug;
   }
 
+  const now = new Date();
+
+  let promotionalFilter = {};
+
+  if (!isAdminOrNoToken) {
+    if (walletBalance > 50) {
+      promotionalFilter = {
+        isPromotional: {
+          $ne: true,
+        },
+      };
+    } else {
+      promotionalFilter = {
+        $or: [
+          {
+            isPromotional: {
+              $ne: true,
+            },
+          },
+          {
+            isPromotional: true,
+            startDate: {
+              $lte: now,
+            },
+            endDate: {
+              $gte: now,
+            },
+          },
+        ],
+      };
+    }
+  }
+
+  const andConditions = [];
+
+  if (Object.keys(query).length) {
+    andConditions.push(query);
+  }
+
+  if (Object.keys(promotionalFilter).length) {
+    andConditions.push(promotionalFilter);
+  }
+
+  const finalQuery =
+    andConditions.length > 0
+      ? {
+          $and: andConditions,
+        }
+      : {};
+
   const skip = (page - 1) * limit;
 
   const [banners, totalDocs] = await Promise.all([
-    CarouselBanner.find(query)
+    CarouselBanner.find(finalQuery)
       .populate({
-        path: "redirectId", // DB field
+        path: "redirectId",
         select: "id name title slug",
       })
-      .sort({ position: 1 })
+      .sort({
+        position: 1,
+      })
       .skip(skip)
       .limit(limit)
       .lean(),
-    CarouselBanner.countDocuments(query),
+
+    CarouselBanner.countDocuments(finalQuery),
   ]);
 
   const formattedBanners = banners.map(
@@ -83,7 +193,10 @@ exports.getCarouselBannersService = async (filters, page = 1, limit = 10) => {
     }),
   );
 
-  return { banners: formattedBanners, totalDocs };
+  return {
+    banners: formattedBanners,
+    totalDocs,
+  };
 };
 
 exports.updateCarouselBannerService = async (id, updateData) => {
@@ -130,19 +243,57 @@ exports.updateCarouselBannerService = async (id, updateData) => {
     }
   }
 
+  // ── Promotional type + date-range validation ──
+  const isPromotional =
+    updateData.isPromotional !== undefined
+      ? updateData.isPromotional
+      : banner.isPromotional;
+
+  const startDateInput =
+    updateData.startDate !== undefined
+      ? updateData.startDate
+      : banner.startDate;
+
+  const endDateInput =
+    updateData.endDate !== undefined ? updateData.endDate : banner.endDate;
+
+  let finalStartDate = null;
+  let finalEndDate = null;
+
+  if (isPromotional === true) {
+    if (!startDateInput || !endDateInput) {
+      throw new BadRequestError(
+        "startDate and endDate are required when isPromotional is true",
+      );
+    }
+
+    finalStartDate = new Date(startDateInput);
+    finalEndDate = new Date(endDateInput);
+
+    if (isNaN(finalStartDate.getTime()) || isNaN(finalEndDate.getTime())) {
+      throw new BadRequestError("startDate/endDate must be valid dates");
+    }
+
+    if (finalStartDate >= finalEndDate) {
+      throw new BadRequestError("endDate must be after startDate");
+    }
+  }
+
   const updated = await CarouselBanner.findByIdAndUpdate(
     id,
     {
       ...updateData,
       redirectId: redirectId ?? null,
       redirectModel,
+      isPromotional: isPromotional === true,
+      startDate: finalStartDate,
+      endDate: finalEndDate,
     },
     { new: true },
   );
 
   return updated;
 };
-
 exports.deleteCarouselBannerService = async (id) => {
   if (!id) throw new BadRequestError("Banner ID is required");
 

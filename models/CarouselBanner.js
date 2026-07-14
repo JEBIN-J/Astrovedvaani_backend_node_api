@@ -46,6 +46,20 @@ const carouselBannerSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  isPromotional: {
+    type: Boolean,
+    default: false,
+  },
+
+  startDate: {
+    type: Date,
+    default: null,
+  },
+
+  endDate: {
+    type: Date,
+    default: null,
+  },
 });
 
 function resolveRedirectModel(bannerType) {

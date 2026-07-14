@@ -14,9 +14,11 @@ const { buildPaginationResponse } = require("../../utils/pagination");
 
 exports.createBanner = asyncHandler(async (req, res) => {
   const result = await createCarouselBannerService(req.body, req.user);
-  return res
-    .status(201)
-    .json({ success: true, data: resul, message: "Banner added successfully" });
+  return res.status(201).json({
+    success: true,
+    data: result,
+    message: "Banner added successfully",
+  });
 });
 exports.getBanners = asyncHandler(async (req, res) => {
   const page = parseInt(req.query.page, 10) || 1;
@@ -27,6 +29,7 @@ exports.getBanners = asyncHandler(async (req, res) => {
     filters,
     page,
     limit,
+    req.user || null,
   );
 
   const pagination = buildPaginationResponse({
@@ -45,13 +48,11 @@ exports.getBanners = asyncHandler(async (req, res) => {
 
 exports.updateBanner = asyncHandler(async (req, res) => {
   const result = await updateCarouselBannerService(req.query.id, req.body);
-  return res
-    .status(200)
-    .json({
-      success: true,
-      data: result,
-      message: "Banner updated successfully",
-    });
+  return res.status(200).json({
+    success: true,
+    data: result,
+    message: "Banner updated successfully",
+  });
 });
 
 exports.deleteBanner = asyncHandler(async (req, res) => {
@@ -59,13 +60,11 @@ exports.deleteBanner = asyncHandler(async (req, res) => {
   if (!id) throw new BadRequestError("Banner ID is required");
 
   const result = await deleteCarouselBannerService(id);
-  return res
-    .status(200)
-    .json({
-      success: true,
-      data: result,
-      message: "Banner deleted successfully",
-    });
+  return res.status(200).json({
+    success: true,
+    data: result,
+    message: "Banner deleted successfully",
+  });
 });
 
 exports.setStaticPage = asyncHandler(async (req, res) => {

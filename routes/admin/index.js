@@ -31,6 +31,7 @@ const rateRequestRoutes = require("./rateRequestRoutes");
 const rechargeCardRoutes = require("./rechargeCardRoute");
 const traditionRoutes = require("./traditionRoute");
 const astrologerActivityRoutes = require("./astrologerActivityRoute");
+const astrologerPromotionRoutes = require("./astrologerPromotionRoute");
 const ADMIN = [Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN];
 const ADMIN_VENDOR = [...ADMIN, Enums.USER.ROLE.VENDOR];
 const SUPER_ADMIN = [Enums.USER.ROLE.SUPER_ADMIN];
@@ -48,7 +49,6 @@ router.use("/coupon", authorizeRoles(...ADMIN), couponRoutes);
 router.use("/reply-ticket", authorizeRoles(...ADMIN), replyTicketRoutes);
 router.use("/vendor", authorizeRoles(...ADMIN_VENDOR), vendorRoutes);
 router.use("/ls", authorizeRoles(...ADMIN_VENDOR), lsRoutes);
-
 
 router.use("/ledger", authorizeRoles(...SUPER_ADMIN), ledgerRoutes);
 router.use("/service", authorizeRoles(...SUPER_ADMIN), serviceRoutes);
@@ -81,5 +81,10 @@ router.use(
   "/astrologer-activity",
   authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
   astrologerActivityRoutes,
+);
+router.use(
+  "/astrologer-promotion",
+  authorizeRoles(Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN),
+  astrologerPromotionRoutes,
 );
 module.exports = router;

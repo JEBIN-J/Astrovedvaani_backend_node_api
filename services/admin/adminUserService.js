@@ -25,6 +25,7 @@ const {
 const Wallet = require("../../models/Wallet");
 const WalletLedger = require("../../models/Ledger");
 const SalarySlip = require("../../models/SalarySlip");
+const Promotion = require("../../models/AstrologerPromotion");
 const { CACHE_PREFIXES, ASTROLOGER_TTL, DEFAULT_TTL, SERVICE_RATES_TTL } =
   CacheService;
 const ASTROLOGER_CACHE_PREFIX = "astro:list";
@@ -487,29 +488,63 @@ async function fetchUsersWithDetails(
   let enriched = users;
 
   // Add astrologer service rates if requested
+  // Add astrologer service rates + promotion details
   if (includeAstrologerDetails) {
     const astroList = users.map((u) => u.astro).filter(Boolean);
     const astroIds = astroList.map((a) => a._id);
 
-    const serviceRates = await AstrologerServiceRates.find({
-      astrologer_id: { $in: astroIds },
-    }).lean();
+    const [serviceRates, promotions] = await Promise.all([
+      AstrologerServiceRates.find({
+        astrologer_id: { $in: astroIds },
+      }).lean(),
+
+      Promotion.find({
+        astrologers: { $in: astroIds },
+        isActive: true,
+      }).lean(),
+    ]);
 
     const rateMap = serviceRates.reduce((acc, rate) => {
       const key = rate.astrologer_id.toString();
-      acc[key] = acc[key] || [];
+
+      if (!acc[key]) {
+        acc[key] = [];
+      }
+
       acc[key].push(rate);
+
       return acc;
     }, {});
 
+    const promotionMap = {};
+
+    promotions.forEach((promotion) => {
+      promotion.astrologers.forEach((astroId) => {
+        promotionMap[astroId.toString()] = {
+          _id: promotion._id,
+          title: promotion.title,
+          services: promotion.services,
+          startDate: promotion.startDate,
+          endDate: promotion.endDate,
+          isActive: promotion.isActive,
+        };
+      });
+    });
+
     enriched = users.map((u) => {
       const astro = u.astro || null;
+
       if (astro) {
         astro.services = rateMap[astro._id.toString()] || [];
+
+        astro.promotion = promotionMap[astro._id.toString()] || null;
       }
+
       const { astro: _omitAstro, ...rest } = u;
+
       return {
         ...rest,
+
         astrologerDetails: astro || null,
       };
     });
