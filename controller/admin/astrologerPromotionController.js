@@ -1,4 +1,5 @@
 const promotionService = require("../../services/admin/astrologerPromotionService");
+const { buildPaginationResponse } = require("../../utils/pagination");
 
 const createPromotion = async (req, res) => {
   try {
@@ -37,16 +38,34 @@ const updatePromotion = async (req, res) => {
 
 const listPromotions = async (req, res) => {
   try {
-    const promotions = await promotionService.listPromotionsForAdmin();
+    const page = parseInt(req.query.page || 1, 10);
+    const limit = parseInt(req.query.limit || 10, 10);
+    const search = req.query.search || "";
+
+    const { promotions, total } = await promotionService.listPromotionsForAdmin(
+      {
+        page,
+        limit,
+        search,
+      },
+    );
+
     return res.status(200).json({
       success: true,
       data: promotions,
+      pagination: buildPaginationResponse({
+        totalDocs: total,
+        totalPages: Math.ceil(total / limit),
+        page,
+        limit,
+      }),
       message: "Promotions listed successfully",
     });
   } catch (err) {
-    return res
-      .status(err.statusCode || 500)
-      .json({ success: false, message: err.message });
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 

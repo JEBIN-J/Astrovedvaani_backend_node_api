@@ -163,6 +163,7 @@ exports.fetchUsers = asyncHandler(async (req, res) => {
     userId,
     astrologerId,
     isDeleted,
+    hasServiceRate,
   } = req.query;
 
   const loginUserId = req.user._id;
@@ -191,6 +192,7 @@ exports.fetchUsers = asyncHandler(async (req, res) => {
     sortOrder,
     exportCsv: exportCsv === "true",
     searchTerm: search,
+    hasServiceRate: req.query.hasServiceRate === "true",
   };
 
   let result = await fetchUsersWithDetails(

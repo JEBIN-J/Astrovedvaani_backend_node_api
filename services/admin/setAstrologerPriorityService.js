@@ -54,7 +54,10 @@ exports.updateAstrologerPriority = async ({ astrologer_ids, adminId }) => {
 };
 
 async function resolveShowPromotions(userId, role) {
-  if (!userId) return true;
+  if (!userId) {
+    logger.info(`[Promotion] no userId -> showPromotions=false`);
+    return false;
+  }
 
   if (role === Enums.USER.ROLE.SUPER_ADMIN) {
     return true;
@@ -254,7 +257,7 @@ exports.fetchAll = async ({
                           { $in: ["$$astrologerId", "$astrologers"] },
                           { $eq: ["$isActive", true] },
                           { $lte: ["$startDate", now] },
-                          { $gte: ["$endDate", now] }, // <-- expired promos are excluded here
+                          { $gte: ["$endDate", now] },
                         ],
                       },
                     },
@@ -294,6 +297,7 @@ exports.fetchAll = async ({
         },
       });
     }
+
     pipeline.push({
       $addFields: {
         priorityIndex: {
@@ -329,6 +333,7 @@ exports.fetchAll = async ({
         promotion: 1,
       },
     });
+
     if (sortPrice) {
       pipeline.push({
         $sort: {

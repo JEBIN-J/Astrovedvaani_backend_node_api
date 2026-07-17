@@ -397,6 +397,7 @@ async function fetchUsersWithDetails(
     sortOrder = "desc",
     searchTerm,
     exportCsv = false,
+    hasServiceRate = false,
   } = options;
 
   const pipeline = [];
@@ -491,30 +492,35 @@ async function fetchUsersWithDetails(
   // Add astrologer service rates + promotion details
   if (includeAstrologerDetails) {
     const astroList = users.map((u) => u.astro).filter(Boolean);
+
     const astroIds = astroList.map((a) => a._id);
 
     const [serviceRates, promotions] = await Promise.all([
       AstrologerServiceRates.find({
-        astrologer_id: { $in: astroIds },
+        astrologer_id: {
+          $in: astroIds,
+        },
       }).lean(),
 
       Promotion.find({
-        astrologers: { $in: astroIds },
+        astrologers: {
+          $in: astroIds,
+        },
         isActive: true,
       }).lean(),
     ]);
 
-    const rateMap = serviceRates.reduce((acc, rate) => {
+    const rateMap = {};
+
+    serviceRates.forEach((rate) => {
       const key = rate.astrologer_id.toString();
 
-      if (!acc[key]) {
-        acc[key] = [];
+      if (!rateMap[key]) {
+        rateMap[key] = [];
       }
 
-      acc[key].push(rate);
-
-      return acc;
-    }, {});
+      rateMap[key].push(rate);
+    });
 
     const promotionMap = {};
 
@@ -531,25 +537,33 @@ async function fetchUsersWithDetails(
       });
     });
 
-    enriched = users.map((u) => {
-      const astro = u.astro || null;
+    enriched = users
+      .map((u) => {
+        const astro = u.astro || null;
 
-      if (astro) {
-        astro.services = rateMap[astro._id.toString()] || [];
+        if (astro) {
+          astro.services = rateMap[astro._id.toString()] || [];
 
-        astro.promotion = promotionMap[astro._id.toString()] || null;
-      }
+          astro.promotion = promotionMap[astro._id.toString()] || null;
+        }
 
-      const { astro: _omitAstro, ...rest } = u;
+        const { astro: _omitAstro, ...rest } = u;
 
-      return {
-        ...rest,
+        return {
+          ...rest,
+          astrologerDetails: astro || null,
+        };
+      })
+      .filter((user) => {
+        if (!hasServiceRate) {
+          return true;
+        }
 
-        astrologerDetails: astro || null,
-      };
-    });
+        const services = user.astrologerDetails?.services || [];
+
+        return services.length > 0;
+      });
   }
-
   // Add followers/following counts
   enriched = await Promise.all(
     enriched.map(async (u) => {

@@ -35,15 +35,6 @@ async function getActivePromotion(astrologerId, serviceType) {
   return { promotion, promoService };
 }
 
-/**
- * Promotional pricing is a ONE-TIME offer for brand-new users, granted
- * right after their free session — mirrors free-session eligibility:
- *   - user.isNewUser must still be true
- *   - user must not have already consumed their promotional session
- * Wallet-balance sufficiency (user must recharge at least the promo rate)
- * is naturally enforced later by userService.getWalletSessionEligibility,
- * so no separate wallet check is needed here.
- */
 function isUserEligibleForPromotion(user) {
   if (!user) return false;
 
@@ -51,12 +42,6 @@ function isUserEligibleForPromotion(user) {
   return true;
 }
 
-/**
- * Atomically "claims" the one-time promotional session for a user.
- * Ensures that EVEN IF the user disconnects after using just a few minutes,
- * or two requests race each other, promo pricing can never be applied twice.
- * Returns true only if THIS call successfully claimed it.
- */
 async function claimPromotionalEligibility(userId) {
   const claimed = await User.findOneAndUpdate(
     {
@@ -70,20 +55,61 @@ async function claimPromotionalEligibility(userId) {
   return !!claimed;
 }
 
-/**
- * Rollback used only when session creation genuinely fails AFTER we
- * already claimed the promo — so the user doesn't lose their one-time
- * eligibility because of a system/wallet error, not because they used it.
- */
 async function releasePromotionalEligibility(userId) {
   try {
     await User.updateOne(
       { _id: userId },
       { $set: { promotionalSessionUsed: false } },
     );
+    logger.info(
+      `[Promotion] Released promotional eligibility for userId=${userId}`,
+    );
   } catch (err) {
     logger.error(
       `[Promotion] Failed to release promotional eligibility for userId=${userId}: ${err.message}`,
+    );
+  }
+}
+
+/**
+ * Decides — at session END time — whether a promotional session actually
+ * had any of its promotional (paid) minutes consumed, or whether the user
+ * only ever used their free minutes and never touched the promo rate.
+ *
+ * Free minutes are always consumed first (see createChatSession: realDuration
+ * = maxDuration (promo-rate wallet minutes) + freeDuration, and free time
+ * counts down before wallet/promo time). So:
+ *
+ *   elapsedMinutes <= freeDuration  -> promo rate was NEVER actually billed
+ *                                      -> release the one-time claim so the
+ *                                         user still has it for next time.
+ *   elapsedMinutes >  freeDuration  -> at least one promotional minute was
+ *                                      billed -> keep it claimed as used.
+ *
+ * Call this from every code path where a promotional session actually
+ * finishes (manual end, full-duration auto-timeout, extended session
+ * auto-timeout).
+ */
+async function reconcilePromotionalUsage({
+  userId,
+  isPromotional,
+  freeDuration,
+  elapsedMinutes,
+  sessionId,
+}) {
+  if (!isPromotional) return;
+
+  const freeDur = freeDuration || 0;
+  const consumedPromoMinutes = (elapsedMinutes ?? 0) - freeDur;
+
+  if (consumedPromoMinutes <= 0) {
+    await releasePromotionalEligibility(userId);
+    logger.info(
+      `[Promotion] sessionId=${sessionId} userId=${userId} only consumed free minutes (${elapsedMinutes}/${freeDur}) -> promo rate never actually used -> released eligibility`,
+    );
+  } else {
+    logger.info(
+      `[Promotion] sessionId=${sessionId} userId=${userId} consumed ${consumedPromoMinutes} promotional minute(s) -> promo eligibility stays used`,
     );
   }
 }
@@ -115,21 +141,26 @@ async function createChatSession({
     const user = await User.findById(userId).lean();
     if (!user) throw new Error("User not found");
 
-    // ─────────────────────────────────────────────────────────────
-    // FR-008..FR-014: Promotional pricing resolution.
-    // Only new users who haven't yet used their one-time promotional
-    // session are checked against active promotions. Promotional
-    // pricing (if found) takes precedence over regular offer pricing.
-    //
-    // IMPORTANT: eligibility is CLAIMED atomically the moment we decide
-    // to apply promo pricing — NOT after the session ends and NOT
-    // proportional to minutes consumed. So even a session ended after
-    // just 1-2 minutes permanently consumes the one-time promo.
-    // ─────────────────────────────────────────────────────────────
+    // ── Free-session eligibility computed up front. Free minutes are
+    // ALWAYS consumed before any paid (normal or promotional) minute, so
+    // we need this number before we decide whether the wallet can fund
+    // any promo minutes at all. ──
+    const freeEligibility = await checkFreeSessionEligibility(user);
+    let freeDuration = 0;
+    let free = false;
+    if (freeEligibility.eligible) {
+      logger.info(
+        `User eligible for free session of ${freeEligibility.duration} minutes`,
+      );
+      freeDuration = freeEligibility.duration;
+      free = true;
+    }
+
     let rate;
     let commission_pct = serviceRate.commission_pct;
     let isPromotional = false;
     let promotionId = null;
+    let walletEligibility = null;
 
     const promoEligible = isUserEligibleForPromotion(user);
     logger.info(
@@ -142,27 +173,51 @@ async function createChatSession({
     }
 
     if (activePromo) {
-      // Try to atomically claim the promo BEFORE using it.
-      promoClaimed = await claimPromotionalEligibility(userId);
+      const promoRate = Number(activePromo.promoService.promotional_rate);
 
-      if (promoClaimed) {
-        rate = Number(activePromo.promoService.promotional_rate);
-        commission_pct = Number(activePromo.promoService.commission_pct);
-        isPromotional = true;
-        promotionId = activePromo.promotion._id;
+      // ── FIX: check BEFORE claiming whether the wallet can fund even ONE
+      // minute at the promotional rate. If wallet balance is 0 (or too
+      // low), the user will only ever consume free minutes in this
+      // session — the promo would never actually be used. Do NOT claim
+      // the one-time eligibility in that case. ──
+      const promoWalletEligibility =
+        await userService.getWalletSessionEligibility(userId, promoRate);
+      const promoMaxDuration = promoWalletEligibility?.maxDuration ?? 0;
 
-        logger.info(`[Promotion] Applying promotional rate (claimed)`, {
-          astrologer_id: astrologer._id,
-          promotion_id: promotionId,
-          service_type: mode,
-          promotional_rate: rate,
-          commission_pct,
-        });
+      logger.info(
+        `[Promotion] userId=${userId} promoRate=${promoRate} promoWalletFundedMinutes=${promoMaxDuration}`,
+      );
+
+      if (promoMaxDuration > 0) {
+        const claimed = await claimPromotionalEligibility(userId);
+
+        if (claimed) {
+          promoClaimed = true;
+          isPromotional = true;
+          rate = promoRate;
+          commission_pct = Number(activePromo.promoService.commission_pct);
+          promotionId = activePromo.promotion._id;
+          walletEligibility = promoWalletEligibility;
+
+          logger.info("[Promotion] Promotional pricing applied & claimed", {
+            userId,
+            astrologerId: astrologer._id,
+            promotionId,
+            rate,
+            promoMaxDuration,
+          });
+        } else {
+          logger.info(
+            `[Promotion] userId=${userId} lost claim race / already used -> falling back to normal pricing`,
+          );
+        }
       } else {
-        // Someone/something already claimed it (race condition, or flag
-        // was set a moment ago) -> fall back to normal pricing.
+        // Wallet can't fund a single promotional minute right now — do
+        // NOT claim, do NOT mark as promotional. User simply gets their
+        // free minutes (and normal pricing for anything beyond that, once
+        // they actually recharge). Their one-time promo stays untouched.
         logger.info(
-          `[Promotion] Claim failed (already used) for userId=${userId}, falling back to normal pricing`,
+          `[Promotion] userId=${userId} has 0 wallet-funded promo minutes (insufficient balance) -> promo NOT claimed, eligibility preserved for later`,
         );
       }
     }
@@ -183,6 +238,13 @@ async function createChatSession({
         final_rate: rate,
         discount_applied: pricing.discount_applied,
       });
+
+      // Normal-rate wallet eligibility (covers both "no promo available"
+      // and "promo available but wallet couldn't fund it" cases).
+      walletEligibility = await userService.getWalletSessionEligibility(
+        userId,
+        rate,
+      );
     }
 
     if (isNaN(rate) || rate <= 0) {
@@ -193,28 +255,10 @@ async function createChatSession({
       `Found astrologer: ${astrologer._id}, rate: ₹${rate}, isPromotional=${isPromotional}`,
     );
 
-    const freeEligibility = await checkFreeSessionEligibility(user);
-    let freeDuration = 0;
-    let free = false;
-    if (freeEligibility.eligible) {
-      logger.info(
-        `User eligible for free session of ${freeEligibility.duration} minutes`,
-      );
-      freeDuration = freeEligibility.duration;
-      free = true;
-    }
-
-    // Wallet must cover at least the resolved rate (promotional or normal)
-    // for the user to get any paid minutes — this naturally enforces
-    // "recharge at least ₹<promo rate>" without extra logic.
-    const walletEligibility = await userService.getWalletSessionEligibility(
-      userId,
-      rate,
-    );
     if (!walletEligibility && !freeEligibility.duration) {
       throw new Error("Could not verify wallet eligibility");
     }
-    const { eligible, wallet, maxDuration, reason } = walletEligibility;
+    const { eligible, maxDuration, reason } = walletEligibility || {};
     logger.info(`maxuduration is ${maxDuration}`);
     let realDuration = (maxDuration ?? 0) + freeDuration;
     if (!eligible && !freeEligibility.eligible) {
@@ -246,11 +290,13 @@ async function createChatSession({
       error: error.stack,
     });
 
-    // If we had claimed the one-time promo but the session was never
-    // actually created (some downstream failure), give the eligibility
-    // back to the user — they didn't actually get to use it.
+    // Rollback the claim ONLY if we already grabbed it and something
+    // downstream (session write, etc.) genuinely failed.
     if (promoClaimed) {
       await releasePromotionalEligibility(userId);
+      logger.info(
+        `[Promotion] Released claimed promo eligibility for userId=${userId} due to session creation failure`,
+      );
     }
 
     return {
@@ -376,4 +422,7 @@ async function handleAstroShareProcessing({ sessionId, astroShare, isFree }) {
 module.exports = {
   createChatSession,
   handleAstroShareProcessing,
+  claimPromotionalEligibility,
+  releasePromotionalEligibility,
+  reconcilePromotionalUsage,
 };

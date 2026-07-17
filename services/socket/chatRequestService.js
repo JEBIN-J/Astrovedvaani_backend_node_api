@@ -3,7 +3,11 @@ const emitSocketError = require("../../utils/socketError");
 const ConsultationSession = require("../../models/ConsultationSession");
 const userService = require("../../services/session/userService");
 const Enums = require("../../utils/constants");
-const { createChatSession } = require("../../services/session/sessionService");
+const {
+  createChatSession,
+  releasePromotionalEligibility,
+  reconcilePromotionalUsage,
+} = require("../../services/session/sessionService");
 const {
   createLedgerEntriesForSession,
   finalizeSession,
@@ -215,6 +219,16 @@ function handleChatRequestEvents(socketManager, socket) {
 
       const cancelReason = reason || "User cancelled the chat request";
 
+      // ── Request was still PENDING (never accepted) — no minutes of any
+      // kind were consumed, so if it was promotional, release the claim
+      // unconditionally. ──
+      if (session.is_promotional) {
+        await releasePromotionalEligibility(session.user_id);
+        logger.info(
+          `[SOCKET] Released promo eligibility for userId=${session.user_id} due to user cancellation of sessionId=${sessionId}`,
+        );
+      }
+
       // Clear session from cache
       await clearSession(sessionId);
 
@@ -371,6 +385,12 @@ function handleChatRequestEvents(socketManager, socket) {
           $set: { lastFreeSessionUsedAt: new Date() },
         });
       }
+      // NOTE: promotionalSessionUsed was already claimed at creation time
+      // (sessionService.createChatSession), NOT here. Whether it actually
+      // ends up "truly used" (i.e. the user goes past their free minutes
+      // and is billed at the promo rate) is decided later, when the
+      // session actually finishes — see reconcilePromotionalUsage() calls
+      // in the finalTimeout below and in chat_session_end / chat_session_extend.
       let astrologer = await getUser(updatedSession.astrologer_user_id);
       if (!astrologer) {
         astrologer = await getUserById(updatedSession.astrologer_user_id);
@@ -422,6 +442,21 @@ function handleChatRequestEvents(socketManager, socket) {
           await clearInSession(sessionId);
           const statusReason =
             Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
+
+          // ── Promo reconciliation: this timeout only fires if the FULL
+          // allotted duration_minutes actually elapsed (session was never
+          // extended). Compare that to freeDuration to see whether any
+          // promotional minute was really billed. ──
+          if (updatedSession.is_promotional) {
+            await reconcilePromotionalUsage({
+              userId: updatedSession.user_id,
+              isPromotional: true,
+              freeDuration: updatedSession.freeDuration || 0,
+              elapsedMinutes: updatedSession.duration_minutes,
+              sessionId,
+            });
+          }
+
           const result = await finalizeSession(
             sessionId,
             userId,
@@ -531,10 +566,6 @@ function handleChatRequestEvents(socketManager, socket) {
         `[SOCKET] chat_session_extend called. sessionId=${sessionId}, userId=${userId}`,
       );
 
-      // =========================================================
-      // FETCH SESSION
-      // =========================================================
-
       const session = await getSession(sessionId);
 
       if (!session) {
@@ -543,10 +574,6 @@ function handleChatRequestEvents(socketManager, socket) {
           message: "Session not found.",
         });
       }
-
-      // =========================================================
-      // CHECK IN SESSION
-      // =========================================================
 
       const userIn = await getInSession(sessionId, session.user_id);
 
@@ -557,20 +584,12 @@ function handleChatRequestEvents(socketManager, socket) {
         });
       }
 
-      // =========================================================
-      // VALIDATE STATUS
-      // =========================================================
-
       if (session.status !== Enums.SERVICE.STATUS.ONGOING) {
         return callback?.({
           success: false,
           message: "Session is not active.",
         });
       }
-
-      // =========================================================
-      // ANTI SPAM
-      // =========================================================
 
       const now = new Date();
 
@@ -584,10 +603,6 @@ function handleChatRequestEvents(socketManager, socket) {
         });
       }
 
-      // =========================================================
-      // WALLET
-      // =========================================================
-
       const wallet = await Wallet.findOne({
         user_id: session.user_id,
       });
@@ -599,10 +614,6 @@ function handleChatRequestEvents(socketManager, socket) {
         });
       }
 
-      // =========================================================
-      // ELAPSED TIME
-      // =========================================================
-
       const elapsedMs = now - new Date(session.start_time);
 
       const elapsedMinutes = Math.min(
@@ -610,19 +621,11 @@ function handleChatRequestEvents(socketManager, socket) {
         session.duration_minutes,
       );
 
-      // =========================================================
-      // FREE CALCULATIONS
-      // =========================================================
-
       const freeDuration = session.freeDuration ?? 0;
 
       const freeConsumed = Math.min(elapsedMinutes, freeDuration);
 
       const walletConsumed = Math.max(0, elapsedMinutes - freeConsumed);
-
-      // =========================================================
-      // WALLET CALCULATIONS
-      // =========================================================
 
       const walletBalance = wallet.balance;
 
@@ -635,10 +638,6 @@ function handleChatRequestEvents(socketManager, socket) {
         walletMinutesAvailable - walletConsumed,
       );
 
-      // =========================================================
-      // NEW TOTAL DURATION
-      // =========================================================
-
       const totalNewMinutes = elapsedMinutes + additionalWalletMinutes;
 
       if (totalNewMinutes <= elapsedMinutes) {
@@ -647,10 +646,6 @@ function handleChatRequestEvents(socketManager, socket) {
           message: "Not enough balance to extend session.",
         });
       }
-
-      // =========================================================
-      // IMPORTANT FIX
-      // =========================================================
 
       const previousTotalDuration = session.duration_minutes;
 
@@ -667,20 +662,12 @@ function handleChatRequestEvents(socketManager, socket) {
 
       logger.info(`[EXTEND FIX] additionalMinutes=${additionalMinutes}`);
 
-      // =========================================================
-      // NO NEW MINUTES
-      // =========================================================
-
       if (additionalMinutes <= 0) {
         return callback?.({
           success: false,
           message: "No additional minutes available.",
         });
       }
-
-      // =========================================================
-      // NEW END TIME
-      // =========================================================
 
       let graceTimeMs = 0;
 
@@ -704,10 +691,6 @@ function handleChatRequestEvents(socketManager, socket) {
         `Grace time (ms): ${graceTimeMs}, New end time: ${newEndTime}`,
       );
 
-      // =========================================================
-      // UPDATE DB
-      // =========================================================
-
       const updatedSession = await ConsultationSession.findByIdAndUpdate(
         sessionId,
         {
@@ -724,15 +707,7 @@ function handleChatRequestEvents(socketManager, socket) {
         { new: true },
       );
 
-      // =========================================================
-      // UPDATE REDIS
-      // =========================================================
-
       await updateSession(sessionId, updatedSession.toObject());
-
-      // =========================================================
-      // CLEAR OLD TIMERS
-      // =========================================================
 
       const oldTimeouts = socketManager.sessionTimeouts.get(sessionId);
 
@@ -742,19 +717,11 @@ function handleChatRequestEvents(socketManager, socket) {
         clearTimeout(oldTimeouts.finalTimeout);
       }
 
-      // =========================================================
-      // TIMER FIX
-      // =========================================================
-
       const bufferMs = 60000;
 
       const endTimeMs = new Date(updatedSession.end_time).getTime();
 
       const actualRemainingMs = Math.max(endTimeMs - Date.now(), 0);
-
-      // =========================================================
-      // DURATION TIMER
-      // =========================================================
 
       const durationTimeout = setTimeout(() => {
         logger.info(
@@ -774,10 +741,6 @@ function handleChatRequestEvents(socketManager, socket) {
               "Session duration completed. Please wait while we process the session.",
           });
       }, actualRemainingMs);
-
-      // =========================================================
-      // FINAL TIMER
-      // =========================================================
 
       const finalTimeout = setTimeout(async () => {
         try {
@@ -805,6 +768,19 @@ function handleChatRequestEvents(socketManager, socket) {
 
           const statusReason =
             Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
+
+          // ── Promo reconciliation: use the FRESH doc from DB so this
+          // reflects the actual final duration_minutes after any
+          // extension(s), not the stale closure value. ──
+          if (latestSession.is_promotional) {
+            await reconcilePromotionalUsage({
+              userId: latestSession.user_id,
+              isPromotional: true,
+              freeDuration: latestSession.freeDuration || 0,
+              elapsedMinutes: latestSession.duration_minutes,
+              sessionId,
+            });
+          }
 
           const result = await finalizeSession(
             sessionId,
@@ -849,18 +825,10 @@ function handleChatRequestEvents(socketManager, socket) {
         }
       }, actualRemainingMs + bufferMs);
 
-      // =========================================================
-      // SAVE TIMERS
-      // =========================================================
-
       socketManager.sessionTimeouts.set(sessionId, {
         durationTimeout,
         finalTimeout,
       });
-
-      // =========================================================
-      // PAYLOAD
-      // =========================================================
 
       const payload = {
         sessionId,
@@ -878,17 +846,9 @@ function handleChatRequestEvents(socketManager, socket) {
         channelId: updatedSession.mode,
       };
 
-      // =========================================================
-      // EMIT
-      // =========================================================
-
       socketManager.io
         .to(`user_${updatedSession.astrologer_user_id}`)
         .emit("chat_session_extended", payload);
-
-      // =========================================================
-      // CALLBACK
-      // =========================================================
 
       return callback?.({
         success: true,
@@ -952,6 +912,16 @@ function handleChatRequestEvents(socketManager, socket) {
           }
         })();
       }
+
+      // ── Astrologer rejected before the session even started — nothing
+      // was consumed, release the one-time promo claim unconditionally. ──
+      if (session.is_promotional) {
+        await releasePromotionalEligibility(session.user_id);
+        logger.info(
+          `[SOCKET] Released promo eligibility for userId=${session.user_id} due to astrologer rejection of sessionId=${sessionId}`,
+        );
+      }
+
       // await session.updateOne({
       //   status: Enums.SERVICE.STATUS.REJECTED,
       //   rejection_reason: rejectionReason,
@@ -1124,6 +1094,26 @@ function handleChatRequestEvents(socketManager, socket) {
           logger.info(
             `[SOCKET] finalizeSession completed for sessionId=${sessionId}`,
           );
+
+          // ── Promo reconciliation: figure out how many minutes were
+          // ACTUALLY consumed (real start_time -> real end_time we just
+          // set above), and only keep the promo "used" if that exceeds
+          // the free minutes the user was given. If the user ended the
+          // chat while still within their free minutes (e.g. free=2min,
+          // ended at 1min), the promo was never touched — release it. ──
+          if (session.is_promotional) {
+            const freeDur = session.freeDuration || 0;
+            const elapsedMs =
+              new Date(session.end_time) - new Date(session.start_time);
+            const elapsedMinutes = Math.max(0, Math.ceil(elapsedMs / 60000));
+            await reconcilePromotionalUsage({
+              userId: session.user_id,
+              isPromotional: true,
+              freeDuration: freeDur,
+              elapsedMinutes,
+              sessionId,
+            });
+          }
 
           const isAstrologer =
             userId.toString() === session.astrologer_user_id.toString();

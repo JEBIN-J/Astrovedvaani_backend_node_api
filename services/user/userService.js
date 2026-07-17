@@ -117,9 +117,9 @@ exports.fetchAstrologers = async ({
     );
 
     // ── Decide whether promotion data should be attached for this caller ──
-    // No userId (no token, e.g. home page) => always attach promotion (if valid).
-    // userId present => attach only if wallet balance <= threshold.
-    let showPromotions = true;
+    // No userId (no token) => never attach promotion.
+    // userId present => attach only if promotionalSessionUsed is false AND wallet balance <= threshold.
+    let showPromotions = false;
 
     if (userId) {
       const user = await User.findById(userId)
@@ -140,6 +140,8 @@ exports.fetchAstrologers = async ({
         showPromotions = balance <= WALLET_PROMO_THRESHOLD;
       }
     }
+
+    logger.info(`showPromotions=${showPromotions} for userId=${userId}`);
 
     const isCacheable =
       !cursor &&
@@ -316,7 +318,6 @@ exports.fetchAstrologers = async ({
               in: {
                 $let: {
                   vars: {
-                    // Find a matching active offer for this service_type
                     matched_offer: {
                       $arrayElemAt: [
                         {
@@ -334,14 +335,12 @@ exports.fetchAstrologers = async ({
                                   ],
                                 },
                                 { $eq: ["$$offer.is_active", true] },
-                                // start_time check: not set OR already started
                                 {
                                   $or: [
                                     { $eq: ["$$offer.start_time", null] },
                                     { $lte: ["$$offer.start_time", now] },
                                   ],
                                 },
-                                // end_time check: not set OR not yet expired
                                 {
                                   $or: [
                                     { $eq: ["$$offer.end_time", null] },
@@ -371,8 +370,6 @@ exports.fetchAstrologers = async ({
                           $cond: [
                             { $ifNull: ["$$matched_offer", false] },
                             {
-                              // PERCENTAGE: rate - (rate * discount_value / 100)
-                              // FLAT:       rate - discount_value
                               $cond: [
                                 {
                                   $eq: [
@@ -401,7 +398,6 @@ exports.fetchAstrologers = async ({
                                     },
                                   ],
                                 },
-                                // FLAT discount
                                 {
                                   $max: [
                                     0,
@@ -415,7 +411,6 @@ exports.fetchAstrologers = async ({
                                 },
                               ],
                             },
-                            // No offer → final_rate equals base rate
                             "$$sr.rate",
                           ],
                         },
@@ -429,9 +424,8 @@ exports.fetchAstrologers = async ({
         },
       },
 
-      // ── NEW: Lookup PROMOTION data separately — does NOT touch service_rates ──
-      // If expired / inactive / not-yet-started -> no match -> promotion_doc stays empty
-      // -> astrologer STILL appears in listing with normal service_rates -> promotion: null
+      // ── Lookup PROMOTION data separately — does NOT touch service_rates ──
+      // Only runs at all when showPromotions is true (i.e. userId present AND eligible)
       ...(showPromotions
         ? [
             {
@@ -446,7 +440,7 @@ exports.fetchAstrologers = async ({
                           { $in: ["$$astrologerId", "$astrologers"] },
                           { $eq: ["$isActive", true] },
                           { $lte: ["$startDate", now] },
-                          { $gte: ["$endDate", now] }, // <-- expired promos are excluded here
+                          { $gte: ["$endDate", now] },
                         ],
                       },
                     },
@@ -468,7 +462,7 @@ exports.fetchAstrologers = async ({
             {
               $unwind: {
                 path: "$promotion_doc",
-                preserveNullAndEmptyArrays: true, // <-- keeps astrologer in pipeline even if no promo matched
+                preserveNullAndEmptyArrays: true,
               },
             },
           ]
@@ -507,13 +501,12 @@ exports.fetchAstrologers = async ({
           ],
         },
         user: 1,
-        service_rates: 1, // ← unchanged, exactly as before
+        service_rates: 1,
         score: 1,
-        promotion_doc: 1, // ← new; will simply be undefined if no valid promo (e.g. expired)
+        promotion_doc: 1,
       },
     });
 
-    // ── online-order field (added only for sorting, not exposed in response) ──
     aggregationPipeline.push({
       $addFields: {
         _onlineOrder: {
@@ -562,7 +555,6 @@ exports.fetchAstrologers = async ({
           },
         },
       });
-      // Sort by final_rate (offer-adjusted) if available, else raw rate
       aggregationPipeline.push({
         $sort: { _onlineOrder: 1, "target_rate.final_rate": sortOrder },
       });
@@ -612,14 +604,13 @@ exports.fetchAstrologers = async ({
         },
       },
       user: r.user || null,
-      // is_offer_applied & final_rate — untouched, exactly as before
       service_rates: (r.service_rates || []).map((sr) => ({
         ...sr,
         is_offer_applied: sr.is_offer_applied ?? false,
         final_rate: sr.final_rate ?? sr.rate,
       })),
-      // ── NEW separate key — promotion data lives only here ──
-      // null when: expired, inactive, not-yet-started, or wallet balance > threshold, or nothing configured
+      // null when: no userId/token, expired, inactive, not-yet-started,
+      // promotionalSessionUsed=true, wallet balance > threshold, or nothing configured
       promotion: r.promotion_doc
         ? {
             _id: r.promotion_doc._id,
@@ -668,7 +659,6 @@ exports.fetchAstrologers = async ({
     return { data: [], pagination: { hasMore: false, nextCursor: null } };
   }
 };
-
 exports.fetchAstrologerById = async (id, userId) => {
   try {
     const astrologer = await Astrologer.findById(id).lean();

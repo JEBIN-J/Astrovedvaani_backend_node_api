@@ -35,6 +35,10 @@ const validateServices = async (services, astrologers) => {
   }
 
   for (const astrologerId of astrologers) {
+    // Astrologer name fetch karo
+    const astrologer =
+      await Astrologer.findById(astrologerId).select("display_name");
+
     const rates = await AstrologerServiceRates.find({
       astrologer_id: astrologerId,
     });
@@ -46,13 +50,13 @@ const validateServices = async (services, astrologers) => {
 
       if (!normalRate) {
         throw new BadRequestError(
-          `Service ${promoService.service_type} not configured for astrologer`,
+          `Service ${promoService.service_type} is not configured for astrologer "${astrologer?.display_name}".`,
         );
       }
 
       if (promoService.promotional_rate > normalRate.rate) {
         throw new BadRequestError(
-          "Promotion rate cannot be greater than original rate.",
+          `Promotional rate for astrologer "${astrologer?.display_name}" cannot be greater than original rate (${normalRate.rate}).`,
         );
       }
     }
@@ -107,20 +111,22 @@ const createPromotion = async ({
 
   const overlap = await Promotion.findOne({
     astrologers: { $in: astrologers },
-
     isActive: true,
-
-    $or: [
-      {
-        startDate: { $lte: end },
-        endDate: { $gte: start },
-      },
-    ],
-  });
+    startDate: { $lte: end },
+    endDate: { $gte: start },
+  }).populate("astrologers", "display_name");
 
   if (overlap) {
+    const conflictedAstrologers = overlap.astrologers.filter((astro) =>
+      astrologers.some((id) => id.toString() === astro._id.toString()),
+    );
+
+    const astrologerNames = conflictedAstrologers
+      .map((astro) => astro.display_name)
+      .join(", ");
+
     throw new ConflictError(
-      "Promotion already exists for selected astrologer.",
+      `Promotion already exists for astrologer(s): ${astrologerNames}.`,
     );
   }
   await validateServices(services, astrologers);
@@ -142,7 +148,7 @@ const createPromotion = async ({
 
 const updatePromotion = async (
   promotionId,
-  { title, astrologers, services, startDate, endDate, updatedBy },
+  { title, astrologers, services, startDate, endDate, updatedBy, isActive },
 ) => {
   const promotion = await Promotion.findById(promotionId);
 
@@ -169,9 +175,9 @@ const updatePromotion = async (
     throw new NotFoundError("Promotion not found.");
   }
 
-  if (!promotion.isActive) {
-    throw new ConflictError("Inactive promotion cannot be updated.");
-  }
+  // if (!promotion.isActive) {
+  //   throw new ConflictError("Inactive promotion cannot be updated.");
+  // }
 
   if (promotion.endDate < new Date()) {
     throw new ConflictError("Expired promotion cannot be updated.");
@@ -226,11 +232,19 @@ const updatePromotion = async (
         endDate: { $gte: start },
       },
     ],
-  });
+  }).populate("astrologers", "display_name");
 
   if (overlap) {
+    const conflictedAstrologers = overlap.astrologers.filter((astro) =>
+      finalAstrologers.some((id) => id.toString() === astro._id.toString()),
+    );
+
+    const astrologerNames = conflictedAstrologers
+      .map((astro) => astro.display_name)
+      .join(", ");
+
     throw new ConflictError(
-      "Selected astrologer already has another promotion.",
+      `Promotion already exists for astrologer(s): ${astrologerNames}.`,
     );
   }
 
@@ -242,25 +256,108 @@ const updatePromotion = async (
   promotion.startDate = start;
   promotion.endDate = end;
   promotion.updatedBy = updatedBy;
+  promotion.isActive = isActive;
   await promotion.save();
 
   return promotion;
 };
-const listPromotionsForAdmin = async () => {
-  const now = new Date();
 
-  const promotions = await Promotion.find({
-    isActive: true,
-  })
-    .populate("astrologers", "display_name profilePicture")
-    .sort({ createdAt: -1 })
-    .lean();
+const listPromotionsForAdmin = async ({ page, limit, search }) => {
+  const skip = (page - 1) * limit;
 
-  return promotions;
+  const pipeline = [
+    {
+      $lookup: {
+        from: "astrologers",
+        localField: "astrologers",
+        foreignField: "_id",
+        as: "astrologers",
+      },
+    },
+  ];
+
+  if (search && search.trim()) {
+    pipeline.push({
+      $match: {
+        $or: [
+          {
+            title: {
+              $regex: search,
+              $options: "i",
+            },
+          },
+          {
+            "astrologers.display_name": {
+              $regex: search,
+              $options: "i",
+            },
+          },
+          {
+            "astrologers.name": {
+              $regex: search,
+              $options: "i",
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  pipeline.push({
+    $facet: {
+      data: [
+        {
+          $sort: {
+            createdAt: -1,
+          },
+        },
+        {
+          $skip: skip,
+        },
+        {
+          $limit: limit,
+        },
+        {
+          $project: {
+            title: 1,
+            services: 1,
+            startDate: 1,
+            endDate: 1,
+            isActive: 1,
+            createdAt: 1,
+            astrologers: {
+              $map: {
+                input: "$astrologers",
+                as: "astro",
+                in: {
+                  _id: "$$astro._id",
+                  name: "$$astro.name",
+                  display_name: "$$astro.display_name",
+                  profile_image: "$$astro.profile_image",
+                },
+              },
+            },
+          },
+        },
+      ],
+      totalCount: [
+        {
+          $count: "count",
+        },
+      ],
+    },
+  });
+
+  const result = await Promotion.aggregate(pipeline);
+
+  return {
+    promotions: result[0].data,
+    total: result[0].totalCount[0]?.count || 0,
+  };
 };
 
 const deactivatePromotion = async (promotionId) => {
-  const promotion = await Promotion.findByIdAndUpdate(
+  const promotion = await Promotion.findByIdAndDelete(
     promotionId,
     { isActive: false },
     { new: true },
