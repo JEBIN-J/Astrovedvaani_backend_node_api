@@ -1,4 +1,4 @@
-const BASE_URL = "https://astrologyapi.nexthikes.in/api/";
+const BASE_URL = "https://api.nextastroapi.com/api/";
 
 const API = {
   LOCATION_SUGGESTIONS: (input) =>
