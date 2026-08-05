@@ -15,9 +15,6 @@ const uploadPDF =
   require("../../../services/communication/template/invoiceTemplate").uploadPDF;
 const ConsultationSession = require("../../../models/ConsultationSession");
 exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
-  // =====================================
-  // DUPLICATE CHECK
-  // =====================================
   const existingSlip = await SalarySlip.findOne({
     user_id: userId,
     month,
@@ -31,18 +28,12 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
     };
   }
 
-  // =====================================
-  // USER
-  // =====================================
   const astrologer = await User.findById(userId).lean();
 
   if (!astrologer) {
     throw new Error("Astrologer not found");
   }
 
-  // =====================================
-  // WALLET
-  // =====================================
   const wallet = await Wallet.findOne({
     user_id: userId,
   });
@@ -51,16 +42,10 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
     throw new Error("Wallet not found");
   }
 
-  // =====================================
-  // DATE RANGE
-  // =====================================
   const startDate = new Date(year, month - 1, 1);
 
   const endDate = new Date(year, month, 1);
 
-  // =====================================
-  // TRANSACTIONS
-  // =====================================
   const transactions = await WalletLedger.find({
     wallet_id: wallet._id,
 
@@ -78,12 +63,6 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
     })
     .lean();
 
-  // =====================================
-  // CALCULATIONS
-  // =====================================
-  // =====================================
-  // CONSULTATION SESSIONS
-  // =====================================
   const sessions = await ConsultationSession.find({
     astrologer_user_id: userId,
 
@@ -97,9 +76,6 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
     },
   }).lean();
 
-  // =====================================
-  // CALCULATIONS
-  // =====================================
   let totalChatEarnings = 0;
   let totalCallEarnings = 0;
   let totalVideoEarnings = 0;
@@ -140,9 +116,6 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
 
   const slipNumber = `SAL-${Date.now()}`;
 
-  // =====================================
-  // TEMPLATE
-  // =====================================
   const templatePath = path.join(
     __dirname,
     "../template/salarySlipTemplate.ejs",
@@ -166,9 +139,6 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
     slipNumber,
   });
 
-  // =====================================
-  // PDF GENERATE
-  // =====================================
   const browser = await puppeteer.launch({
     headless: true,
 
@@ -189,9 +159,6 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
 
   await browser.close();
 
-  // =====================================
-  // SAVE TEMP PDF
-  // =====================================
   const salaryDir = path.join(__dirname, "../salary-slips");
 
   if (!fs.existsSync(salaryDir)) {
@@ -206,43 +173,48 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
 
   fs.writeFileSync(pdfPath, pdfBuffer);
 
-  // =====================================
-  // UPLOAD PDF
-  // =====================================
   const uploadedUrl = await uploadPDF(pdfPath);
 
-  // =====================================
-  // DELETE LOCAL FILE
-  // =====================================
   fs.unlinkSync(pdfPath);
 
-  // =====================================
-  // STORE IN DB
-  // =====================================
-  const salarySlip = await SalarySlip.create({
-    user_id: userId,
+  let salarySlip;
 
-    month,
-    year,
+  try {
+    salarySlip = await SalarySlip.create({
+      user_id: userId,
 
-    slip_number: slipNumber,
+      month,
+      year,
 
-    total_chat_minutes: totalChatMinutes,
-    total_call_minutes: totalCallMinutes,
-    total_video_minutes: totalVideoMinutes,
+      slip_number: slipNumber,
 
-    total_chat_earnings: totalChatEarnings,
-    total_call_earnings: totalCallEarnings,
-    total_video_earnings: totalVideoEarnings,
+      total_chat_minutes: totalChatMinutes,
+      total_call_minutes: totalCallMinutes,
+      total_video_minutes: totalVideoMinutes,
 
-    total_earnings: totalEarnings,
-    final_payout: finalPayout,
+      total_chat_earnings: totalChatEarnings,
+      total_call_earnings: totalCallEarnings,
+      total_video_earnings: totalVideoEarnings,
 
-    pdf_url: uploadedUrl,
-  });
+      total_earnings: totalEarnings,
+      final_payout: finalPayout,
+
+      pdf_url: uploadedUrl,
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      salarySlip = await SalarySlip.findOne({
+        user_id: userId,
+        month,
+        year,
+      });
+    } else {
+      throw err;
+    }
+  }
+
   return {
     success: true,
-
     salarySlip,
   };
 };

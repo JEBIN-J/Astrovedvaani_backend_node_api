@@ -19,6 +19,7 @@ const MediaContentController = require("../controller/admin/mediaContentControll
 const metaSeoController = require("../controller/admin/metaSeoController");
 const traditionController = require("../controller/user/traditionController");
 const authKundliMiddleware = require("../middlewares/authkundliMiddlware");
+const appVersionController = require("../controller/user/appVersionController");
 router.get("/fetch-static-pages", contentController.getStaticPage);
 router.get(
   "/fetch-carousel",
@@ -44,7 +45,11 @@ router.get("/pooja-by-slug", poojaController.getPoojaById);
 router.get("/product-by-slug", productController.getProduct);
 router.get("/product-reviews", productController.getProductReviews);
 router.get("/products/search", productController.searchProducts);
-router.get("/fetch-astrologer-by-id", userController.getAstrologerById);
+router.get(
+  "/fetch-astrologer-by-id",
+  authKundliMiddleware,
+  userController.getAstrologerById,
+);
 router.get("/fetch-ui-setting", settingController.getValidationSetting);
 router.get("/fetch-tax-slab", taxSlabController.getAllTaxSlab);
 router.get("/fetch-kundli/image", kiController.getAllKundlis);
@@ -72,4 +77,5 @@ router.get(
   "/tradition/fetch-id-or-slug",
   traditionController.getTraditionBySlugOrId,
 );
+router.post("/app-version/check", appVersionController.checkAppVersion);
 module.exports = router;

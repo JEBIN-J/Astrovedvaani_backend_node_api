@@ -99,6 +99,7 @@ async function handleRazorpayRecharge(
   transaction_type,
   bonus = 0,
   is_applicable = false,
+  rechargeCardId = null,
 ) {
   console.log("✅ Razorpay Recharge Details", {
     base_amount,
@@ -107,6 +108,7 @@ async function handleRazorpayRecharge(
     final_amount,
     bonus,
     discountAmount,
+    rechargeCardId,
   });
 
   const integration = await ThirdPartyIntegration.findOne({
@@ -129,7 +131,7 @@ async function handleRazorpayRecharge(
     key_secret: integration.api_secret,
   });
 
-  // ✅ Create Razorpay order
+  //  Create Razorpay order
   const order = await razorpay.orders.create({
     amount: Math.round(final_amount * 100), // paise
     currency: "INR",
@@ -143,6 +145,7 @@ async function handleRazorpayRecharge(
       base_amount,
       final_amount,
       bonus_amount: bonus,
+      recharge_card_id: rechargeCardId ? rechargeCardId.toString() : null, // ← NEW
       // coins_credited: coins, // added
     },
   });
@@ -172,6 +175,7 @@ async function handleRazorpayRecharge(
       gst_amount,
       original_amount: base_amount,
       is_applicable,
+      recharge_card_id: rechargeCardId || null,
     },
     bonus_amount: bonus,
     // coins_credited: coins,
@@ -190,14 +194,14 @@ async function handleRazorpayRecharge(
     order_id: order.id,
     currency: "INR",
     gateway_key,
-    amount_payable: final_amount, // ✅ You pay this (includes GST)
+    amount_payable: final_amount,
     base_amount,
     gst_percent,
     gst_amount,
     discount_amount: discountAmount,
     bonus_amount: bonus,
     // coins_credited: coins, // new
-    total_wallet_credit: base_amount + bonus, // ✅ You get this in wallet
+    total_wallet_credit: base_amount + bonus, //  You get this in wallet
     coupon_applied: !!couponCode && is_applicable,
     ledger_id: ledger._id,
   };
@@ -612,6 +616,10 @@ exports.initiateRecharge = async (
         transaction_type,
         bonus,
         card.is_applicable,
+        card._id, // ← NEW: pass the recharge card's _id through so the
+        // ledger entry created inside handleRazorpayRecharge can record
+        // which card was used (needed for the admin dashboard's
+        // per-card bonus % breakdown).
       );
     }
 

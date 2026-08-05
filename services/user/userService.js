@@ -437,7 +437,16 @@ exports.fetchAstrologers = async ({
                     $match: {
                       $expr: {
                         $and: [
-                          { $in: ["$$astrologerId", "$astrologers"] },
+                          // NOTE: make sure "astrologers" is the actual array field name
+                          // on your Promotion schema, holding ObjectId values that match
+                          // astrologer._id's type. If your field is named differently
+                          // (e.g. astrologer_ids), rename it below.
+                          {
+                            $in: [
+                              "$$astrologerId",
+                              { $ifNull: ["$astrologers", []] },
+                            ],
+                          },
                           { $eq: ["$isActive", true] },
                           { $lte: ["$startDate", now] },
                           { $gte: ["$endDate", now] },
@@ -465,8 +474,31 @@ exports.fetchAstrologers = async ({
                 preserveNullAndEmptyArrays: true,
               },
             },
+            // ── Compute promotion priority flag RIGHT HERE, right after the lookup ──
+            // This guarantees the field exists and is type-safe, regardless of what
+            // happens in later stages (project/addFields ordering issues).
+            {
+              $addFields: {
+                _promotionOrder: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $ne: [{ $type: "$promotion_doc" }, "missing"] },
+                        { $ne: ["$promotion_doc", null] },
+                      ],
+                    },
+                    0,
+                    1,
+                  ],
+                },
+              },
+            },
           ]
-        : []),
+        : [
+            // When promotions aren't shown at all for this request, everyone gets
+            // the same order value so sorting behaves exactly as before.
+            { $addFields: { _promotionOrder: 1 } },
+          ]),
     );
 
     if (search) {
@@ -504,6 +536,7 @@ exports.fetchAstrologers = async ({
         service_rates: 1,
         score: 1,
         promotion_doc: 1,
+        _promotionOrder: 1, // ← now explicitly carried forward through $project
       },
     });
 
@@ -556,26 +589,39 @@ exports.fetchAstrologers = async ({
         },
       });
       aggregationPipeline.push({
-        $sort: { _onlineOrder: 1, "target_rate.final_rate": sortOrder },
+        $sort: {
+          _promotionOrder: 1,
+          _onlineOrder: 1,
+          "target_rate.final_rate": sortOrder,
+        },
       });
     } else if (sortExperience) {
       aggregationPipeline.push({
         $sort: {
+          _promotionOrder: 1,
           _onlineOrder: 1,
           "astrologer.experience_years": sortExperience === "asc" ? 1 : -1,
         },
       });
     } else if (sortRating) {
       aggregationPipeline.push({
-        $sort: { _onlineOrder: 1, ratings_avg: sortRating === "asc" ? 1 : -1 },
+        $sort: {
+          _promotionOrder: 1,
+          _onlineOrder: 1,
+          ratings_avg: sortRating === "asc" ? 1 : -1,
+        },
       });
     } else {
       aggregationPipeline.push({
-        $sort: { _onlineOrder: 1, score: -1, _id: 1 },
+        $sort: { _promotionOrder: 1, _onlineOrder: 1, score: -1, _id: 1 },
       });
     }
 
     aggregationPipeline.push({ $limit: limit + 1 });
+
+    logger.info(
+      `Final aggregation pipeline: ${JSON.stringify(aggregationPipeline)}`,
+    );
 
     const result = await AstrologerRanking.aggregate(aggregationPipeline);
 
@@ -725,11 +771,7 @@ exports.fetchAstrologerById = async (id, userId) => {
         final_rate: finalRate,
       };
     });
-
-    // ── Decide whether promotion data should be attached for this caller ──
-    // No userId (no token) => always attach promotion (if valid).
-    // userId present => attach only if promotionalSessionUsed is false AND wallet balance <= threshold.
-    let showPromotions = true;
+    let showPromotions = false;
 
     if (userId) {
       const userDoc = await User.findById(userId)
@@ -750,6 +792,10 @@ exports.fetchAstrologerById = async (id, userId) => {
         showPromotions = balance <= WALLET_PROMO_THRESHOLD;
       }
     }
+
+    logger.info(
+      `showPromotions=${showPromotions} for userId=${userId} astrologerId=${id}`,
+    );
 
     // ── Fetch promotion data only if showPromotions is true ──
     // If expired / inactive / not-yet-started -> no match -> promotion stays null
@@ -783,7 +829,9 @@ exports.fetchAstrologerById = async (id, userId) => {
       service_rates: updatedServiceRates,
       isFollow,
       follower_count: followerCount,
-      promotion, // ← new; null when expired/inactive/not-yet-started/wallet-above-threshold/session-used
+      // null when: no userId/token, expired, inactive, not-yet-started,
+      // promotionalSessionUsed=true, or wallet balance > threshold
+      promotion,
     };
   } catch (err) {
     logger.error("Error in fetchAstrologerById:", err);

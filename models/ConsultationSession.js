@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const Enums = require('../utils/constants');
+const mongoose = require("mongoose");
+const Enums = require("../utils/constants");
 const { Schema } = mongoose;
 
 const ALL_STATUS_REASONS = [
@@ -12,19 +12,19 @@ const consultationSessionSchema = new Schema(
   {
     user_id: {
       type: Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
 
     astrologer_user_id: {
       type: Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
 
     astrologer_id: {
       type: Schema.Types.ObjectId,
-      ref: 'Astrologer',
+      ref: "Astrologer",
     },
 
     mode: {
@@ -119,17 +119,25 @@ const consultationSessionSchema = new Schema(
       type: Date,
       default: null,
     },
+    is_promotional: {
+      type: Boolean,
+      default: false,
+    },
+
+    promotion_id: {
+      type: Schema.Types.ObjectId,
+      ref: "AstrologerPromotion",
+      default: null,
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
-
-
 
 // =========================
 // VALIDATION
 // =========================
 
-consultationSessionSchema.pre('save', function (next) {
+consultationSessionSchema.pre("save", function (next) {
   const status = this.status;
   const reason = this.status_reason;
 
@@ -149,15 +157,11 @@ consultationSessionSchema.pre('save', function (next) {
   const validReasons = validReasonsMap[status] || [];
 
   if (!validReasons.includes(reason)) {
-    return next(
-      new Error('Invalid status_reason for selected status')
-    );
+    return next(new Error("Invalid status_reason for selected status"));
   }
 
   next();
 });
-
-
 
 // =========================
 // INDEXES
@@ -181,6 +185,6 @@ consultationSessionSchema.index({
 });
 
 module.exports = mongoose.model(
-  'ConsultationSession',
-  consultationSessionSchema
+  "ConsultationSession",
+  consultationSessionSchema,
 );

@@ -71,25 +71,6 @@ async function releasePromotionalEligibility(userId) {
   }
 }
 
-/**
- * Decides — at session END time — whether a promotional session actually
- * had any of its promotional (paid) minutes consumed, or whether the user
- * only ever used their free minutes and never touched the promo rate.
- *
- * Free minutes are always consumed first (see createChatSession: realDuration
- * = maxDuration (promo-rate wallet minutes) + freeDuration, and free time
- * counts down before wallet/promo time). So:
- *
- *   elapsedMinutes <= freeDuration  -> promo rate was NEVER actually billed
- *                                      -> release the one-time claim so the
- *                                         user still has it for next time.
- *   elapsedMinutes >  freeDuration  -> at least one promotional minute was
- *                                      billed -> keep it claimed as used.
- *
- * Call this from every code path where a promotional session actually
- * finishes (manual end, full-duration auto-timeout, extended session
- * auto-timeout).
- */
 async function reconcilePromotionalUsage({
   userId,
   isPromotional,

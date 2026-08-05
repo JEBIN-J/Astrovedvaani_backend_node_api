@@ -80,6 +80,7 @@ exports.createCarouselBannerService = async (data, user) => {
   return await banner.save();
 };
 const ADMIN_ROLES = [Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN];
+
 exports.getCarouselBannersService = async (
   filters,
   page = 1,
@@ -186,9 +187,12 @@ exports.getCarouselBannersService = async (
     CarouselBanner.countDocuments(finalQuery),
   ]);
 
+  const hasToken = !!user;
+
   const formattedBanners = banners.map(
-    ({ redirectId, redirectModel, ...rest }) => ({
+    ({ redirectId, redirectModel, isPromotional, ...rest }) => ({
       ...rest,
+      isPromotional: hasToken ? isPromotional : null,
       redirectData: redirectId || null,
     }),
   );
@@ -198,7 +202,6 @@ exports.getCarouselBannersService = async (
     totalDocs,
   };
 };
-
 exports.updateCarouselBannerService = async (id, updateData) => {
   if (!id) throw new BadRequestError("Banner ID is required");
 

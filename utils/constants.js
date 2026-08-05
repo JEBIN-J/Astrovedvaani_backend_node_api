@@ -74,7 +74,7 @@ const Enums = {
       PENDING: 500,
       COMPLETED: 501,
       CANCELLED: 502,
-      NO_SHOW: 503,
+      ASTROLOGER_NO_RESPONSE: 503,
       ONGOING: 504,
     },
     STATUS_REASON: {

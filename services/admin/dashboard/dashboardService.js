@@ -29,7 +29,6 @@ const getDateRanges = () => {
   return { todayStart, yesterdayStart, lastWeekStart, lastMonthStart };
 };
 
-
 exports.getOverview = async () => {
   const dbCounts = await getDbCounts();
   const activeCounts = await getActiveCounts();
@@ -49,9 +48,21 @@ async function getDbCounts() {
     User.countDocuments({ role: Enums.USER.ROLE.ASTROLOGER, isDeleted: false }),
     User.countDocuments({ role: Enums.USER.ROLE.VENDOR, isDeleted: false }),
 
-    User.countDocuments({ role: Enums.USER.ROLE.USER, isNewUser: true, isDeleted: false }),
-    User.countDocuments({ role: Enums.USER.ROLE.ASTROLOGER, isNewUser: true, isDeleted: false }),
-    User.countDocuments({ role: Enums.USER.ROLE.VENDOR, isNewUser: true, isDeleted: false }),
+    User.countDocuments({
+      role: Enums.USER.ROLE.USER,
+      isNewUser: true,
+      isDeleted: false,
+    }),
+    User.countDocuments({
+      role: Enums.USER.ROLE.ASTROLOGER,
+      isNewUser: true,
+      isDeleted: false,
+    }),
+    User.countDocuments({
+      role: Enums.USER.ROLE.VENDOR,
+      isNewUser: true,
+      isDeleted: false,
+    }),
 
     getProductStats(),
   ]);
@@ -64,15 +75,12 @@ async function getDbCounts() {
   };
 }
 async function getActiveCounts() {
-  const [
-    activeUsersRedis,
-    activeAstrosRedis,
-    activeVendorsRedis,
-  ] = await Promise.all([
-    getActiveCountByRole(Enums.USER.ROLE.USER),
-    getActiveCountByRole(Enums.USER.ROLE.ASTROLOGER),
-    getActiveCountByRole(Enums.USER.ROLE.VENDOR),
-  ]);
+  const [activeUsersRedis, activeAstrosRedis, activeVendorsRedis] =
+    await Promise.all([
+      getActiveCountByRole(Enums.USER.ROLE.USER),
+      getActiveCountByRole(Enums.USER.ROLE.ASTROLOGER),
+      getActiveCountByRole(Enums.USER.ROLE.VENDOR),
+    ]);
 
   console.log("Active counts from Redis:", {
     users: activeUsersRedis,
@@ -240,6 +248,164 @@ const getSessionEarnings = async ({
     CALL: build(CALL),
   };
 };
+
+// ────────────────────────────────────────────────────────────────────
+// NEW #2: Revenue that came specifically from PROMOTIONAL sessions
+// (is_promotional: true), broken down by mode (CHAT/CALL/VIDEO) and by
+// time window, same shape/pattern as getSessionEarnings above.
+//
+// For each mode+window we return:
+//   - revenue      -> gross amount charged to users (total_amount) on
+//                      promotional sessions — "kitna aaya" (what came in)
+//   - adminEarning -> platform's cut of that (total_amount - astrologer_share_amount),
+//                      consistent with how getSessionEarnings computes admin_amount
+//   - sessions     -> count of completed promotional sessions
+// ────────────────────────────────────────────────────────────────────
+const getPromotionSessionEarnings = async ({
+  todayStart,
+  yesterdayStart,
+  lastWeekStart,
+  lastMonthStart,
+}) => {
+  const { CHAT, VIDEO, CALL } = Enums.SERVICE.TYPE;
+  const { COMPLETED } = Enums.SERVICE.STATUS;
+
+  const data = await ConsultationSession.aggregate([
+    {
+      $match: {
+        status: COMPLETED,
+        mode: { $in: [CHAT, VIDEO, CALL] },
+        is_promotional: true,
+      },
+    },
+    {
+      $addFields: {
+        admin_amount: {
+          $subtract: ["$total_amount", "$astrologer_share_amount"],
+        },
+      },
+    },
+    {
+      $facet: {
+        total: [
+          {
+            $group: {
+              _id: "$mode",
+              revenue: { $sum: "$total_amount" },
+              adminEarning: { $sum: "$admin_amount" },
+              sessions: { $sum: 1 },
+            },
+          },
+        ],
+        today: [
+          { $match: { createdAt: { $gte: todayStart } } },
+          {
+            $group: {
+              _id: "$mode",
+              revenue: { $sum: "$total_amount" },
+              adminEarning: { $sum: "$admin_amount" },
+              sessions: { $sum: 1 },
+            },
+          },
+        ],
+        yesterday: [
+          { $match: { createdAt: { $gte: yesterdayStart, $lt: todayStart } } },
+          {
+            $group: {
+              _id: "$mode",
+              revenue: { $sum: "$total_amount" },
+              adminEarning: { $sum: "$admin_amount" },
+              sessions: { $sum: 1 },
+            },
+          },
+        ],
+        lastWeek: [
+          { $match: { createdAt: { $gte: lastWeekStart } } },
+          {
+            $group: {
+              _id: "$mode",
+              revenue: { $sum: "$total_amount" },
+              adminEarning: { $sum: "$admin_amount" },
+              sessions: { $sum: 1 },
+            },
+          },
+        ],
+        lastMonth: [
+          { $match: { createdAt: { $gte: lastMonthStart } } },
+          {
+            $group: {
+              _id: "$mode",
+              revenue: { $sum: "$total_amount" },
+              adminEarning: { $sum: "$admin_amount" },
+              sessions: { $sum: 1 },
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const s = data[0];
+  const empty = { revenue: 0, adminEarning: 0, sessions: 0 };
+
+  const mapByMode = (arr) =>
+    arr.reduce((acc, d) => {
+      acc[d._id] = {
+        revenue: round2(d.revenue),
+        adminEarning: round2(d.adminEarning),
+        sessions: d.sessions || 0,
+      };
+      return acc;
+    }, {});
+
+  const totalMap = mapByMode(s.total);
+  const todayMap = mapByMode(s.today);
+  const yesterdayMap = mapByMode(s.yesterday);
+  const lastWeekMap = mapByMode(s.lastWeek);
+  const lastMonthMap = mapByMode(s.lastMonth);
+
+  const build = (mode) => ({
+    total: totalMap[mode] || { ...empty },
+    today: todayMap[mode] || { ...empty },
+    yesterday: yesterdayMap[mode] || { ...empty },
+    lastWeek: lastWeekMap[mode] || { ...empty },
+    lastMonth: lastMonthMap[mode] || { ...empty },
+  });
+
+  const byMode = {
+    CHAT: build(CHAT),
+    VIDEO: build(VIDEO),
+    CALL: build(CALL),
+  };
+
+  const windows = ["total", "today", "yesterday", "lastWeek", "lastMonth"];
+  const combined = {};
+  windows.forEach((w) => {
+    combined[w] = {
+      revenue: round2(
+        Object.values(byMode).reduce((s2, m) => s2 + (m[w].revenue || 0), 0),
+      ),
+      adminEarning: round2(
+        Object.values(byMode).reduce(
+          (s2, m) => s2 + (m[w].adminEarning || 0),
+          0,
+        ),
+      ),
+      sessions: Object.values(byMode).reduce(
+        (s2, m) => s2 + (m[w].sessions || 0),
+        0,
+      ),
+    };
+  });
+
+  return { combined, byMode };
+};
+
+exports.getPromotionRevenue = async () => {
+  const dates = getDateRanges();
+  return await getPromotionSessionEarnings(dates);
+};
+
 const getLiveEarnings = async ({
   todayStart,
   yesterdayStart,
@@ -445,12 +611,12 @@ const getDateRangesB = () => {
 
   // Convert to IST start of day → then to UTC
   const startOfDayIST = new Date(
-    now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
   startOfDayIST.setHours(0, 0, 0, 0);
 
   // Convert IST start to UTC
-  const todayStart = new Date(startOfDayIST.getTime() - (5.5 * 60 * 60 * 1000));
+  const todayStart = new Date(startOfDayIST.getTime() - 5.5 * 60 * 60 * 1000);
 
   return {
     todayStart,
@@ -460,15 +626,15 @@ const getDateRangesB = () => {
     lastWeekStart: new Date(todayStart.getTime() - 7 * 86400000),
 
     lastMonthStart: new Date(
-      new Date(todayStart).setMonth(todayStart.getMonth() - 1)
+      new Date(todayStart).setMonth(todayStart.getMonth() - 1),
     ),
 
     last6MonthStart: new Date(
-      new Date(todayStart).setMonth(todayStart.getMonth() - 6)
+      new Date(todayStart).setMonth(todayStart.getMonth() - 6),
     ),
 
     lastYearStart: new Date(
-      new Date(todayStart).setFullYear(todayStart.getFullYear() - 1)
+      new Date(todayStart).setFullYear(todayStart.getFullYear() - 1),
     ),
   };
 };
@@ -548,9 +714,7 @@ const getRechargeSummary = async () => {
 
     {
       $facet: {
-        lifetime: [
-          { $group: { _id: null, amount: { $sum: "$amount" } } },
-        ],
+        lifetime: [{ $group: { _id: null, amount: { $sum: "$amount" } } }],
 
         lastYear: [
           { $match: { timestamp: { $gte: lastYearStart } } },
@@ -615,6 +779,60 @@ const getRechargeSummary = async () => {
     },
   };
 };
+
+// ────────────────────────────────────────────────────────────────────
+// NEW #1: Lifetime recharge bonus summary — "aaj tak jitne recharge hue
+// hain, unpar total kitna extra/bonus mila hai, percentage me".
+// Per-card breakdown was intentionally removed — this returns only the
+// overall lifetime figure across every paid recharge, regardless of
+// which card was used.
+// ────────────────────────────────────────────────────────────────────
+const getRechargeCardBonusSummary = async () => {
+  // Only the lifetime overall figure is needed now (per-card breakdown
+  // removed on request) — a single $group with _id: null across all paid
+  // recharges, regardless of which card was used.
+  const agg = await Ledger.aggregate([
+    {
+      $match: {
+        transaction_type: Enums.TRANSACTION.TYPE.RECHARGE,
+        direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+        payment_status: Enums.PAYMENT.STATUS.PAID,
+        amount: { $gt: 0 },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalRecharges: { $sum: 1 },
+        totalAmountPaid: { $sum: "$amount" },
+        totalBonusGiven: { $sum: { $ifNull: ["$bonus_amount", 0] } },
+        totalCredited: {
+          $sum: { $ifNull: ["$credit_amount", "$amount"] },
+        },
+      },
+    },
+  ]);
+
+  const d = agg[0] || {};
+
+  const totalAmountPaid = round2(d.totalAmountPaid || 0);
+  const totalBonusGiven = round2(d.totalBonusGiven || 0);
+  const bonusPercentage =
+    totalAmountPaid > 0 ? round2((totalBonusGiven / totalAmountPaid) * 100) : 0;
+
+  return {
+    overall: {
+      totalRecharges: d.totalRecharges || 0,
+      totalAmountPaid,
+      totalBonusGiven,
+      totalCredited: round2(d.totalCredited || 0),
+      bonusPercentage,
+    },
+  };
+};
+
+exports.getRechargeCardBonusSummary = getRechargeCardBonusSummary;
+
 const getGSTSummary = async () => {
   const {
     todayStart,
@@ -770,7 +988,7 @@ const getBalanceSummary = async () => {
 
       case Enums.USER.ROLE.SUPER_ADMIN:
         summary.admins += round2(item.totalBalance);
-        break;  
+        break;
     }
   });
 
@@ -779,12 +997,7 @@ const getBalanceSummary = async () => {
   return summary;
 };
 exports.getWalletSummary = async () => {
-  const [
-    currentBalance,
-    recharge,
-    gst,
-    balances,
-  ] = await Promise.all([
+  const [currentBalance, recharge, gst, balances] = await Promise.all([
     getCurrentBalance(),
     getRechargeSummary(),
     getGSTSummary(),
@@ -995,15 +1208,25 @@ exports.getRecentOrders = async () => {
 };
 
 exports.getDashboardAll = async () => {
-  const [overview, communication, earnings, wallet, recentUsers, recentOrders] =
-    await Promise.all([
-      exports.getOverview(),
-      exports.getCommunicationSummary(),
-      exports.getEarnings(),
-      exports.getWalletSummary(),
-      exports.getRecentUsers(),
-      exports.getRecentOrders(),
-    ]);
+  const [
+    overview,
+    communication,
+    earnings,
+    wallet,
+    recentUsers,
+    recentOrders,
+    rechargeCardBonusSummary,
+    promotionRevenue,
+  ] = await Promise.all([
+    exports.getOverview(),
+    exports.getCommunicationSummary(),
+    exports.getEarnings(),
+    exports.getWalletSummary(),
+    exports.getRecentUsers(),
+    exports.getRecentOrders(),
+    exports.getRechargeCardBonusSummary(),
+    exports.getPromotionRevenue(),
+  ]);
 
   return {
     overview,
@@ -1012,5 +1235,8 @@ exports.getDashboardAll = async () => {
     wallet,
     recentUsers: recentUsers,
     recentOrders: recentOrders,
+    // NEW: recharge-card-wise bonus %, and revenue coming from promotional sessions
+    rechargeCardBonusSummary,
+    promotionRevenue,
   };
 };
