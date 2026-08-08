@@ -227,136 +227,6 @@ exports.getUserLedger = async (userId, page = 1, limit = 10, filters = {}) => {
   };
 };
 
-async function getSessionAnalytics(dateFilter = {}) {
-  logger.info(`[Session Analytics] Start`, { dateFilter });
-
-  const dateCondition = buildDateCondition(dateFilter);
-  const matchDate = Object.keys(dateCondition).length
-    ? { createdAt: dateCondition }
-    : {};
-
-  const [
-    sessionStats,
-    liveCount,
-    userDebitSessions,
-    astroCredits,
-    adminCredits,
-  ] = await Promise.all([
-    ConsultationSession.aggregate([
-      { $match: matchDate },
-      {
-        $group: {
-          _id: "$mode",
-          count: { $sum: 1 },
-          totalDuration: { $sum: "$duration_minutes" },
-          totalAmount: { $sum: "$total_amount" },
-          totalAstroShare: { $sum: "$astrologer_share_amount" },
-        },
-      },
-    ]),
-    ConsultationSession.countDocuments({
-      ...matchDate,
-      mode: Enums.SERVICE.TYPE.VIDEO,
-      status: Enums.SERVICE.STATUS.COMPLETED,
-    }),
-    WalletLedger.aggregate([
-      {
-        $match: {
-          ...matchDate,
-          direction: Enums.TRANSACTION.DIRECTION.DEBIT,
-          transaction_type: Enums.TRANSACTION.TYPE.SESSION,
-        },
-      },
-      {
-        $group: {
-          _id: "$payment_status",
-          totalAmount: { $sum: "$final_amount" },
-        },
-      },
-    ]),
-    WalletLedger.aggregate([
-      {
-        $match: {
-          ...matchDate,
-          direction: Enums.TRANSACTION.DIRECTION.CREDIT,
-          transaction_type: Enums.TRANSACTION.TYPE.SESSION,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $sum: "$final_amount" },
-        },
-      },
-    ]),
-    WalletLedger.aggregate([
-      {
-        $match: {
-          ...matchDate,
-          direction: Enums.TRANSACTION.DIRECTION.CREDIT,
-          "metadata.is_admin_commission": true,
-        },
-      },
-      {
-        $group: {
-          _id: "$payment_status",
-          totalAmount: { $sum: "$final_amount" },
-        },
-      },
-    ]),
-  ]);
-
-  const sessionCount = {
-    CHAT: { count: 0, duration: 0, amount: 0, astroShare: 0 },
-    VIDEO: { count: 0, duration: 0, amount: 0, astroShare: 0 },
-    CALL: { count: 0, duration: 0, amount: 0, astroShare: 0 },
-  };
-
-  sessionStats.forEach((item) => {
-    const key =
-      item._id === Enums.SERVICE.TYPE.CHAT
-        ? "CHAT"
-        : item._id === Enums.SERVICE.TYPE.VIDEO
-          ? "VIDEO"
-          : item._id === Enums.SERVICE.TYPE.CALL
-            ? "CALL"
-            : null;
-
-    if (key) {
-      sessionCount[key] = {
-        count: item.count,
-        duration: item.totalDuration || 0,
-        amount: item.totalAmount || 0,
-        astroShare: item.totalAstroShare || 0,
-      };
-    }
-  });
-
-  const totalSessionAmount = Object.values(sessionCount).reduce(
-    (sum, s) => sum + s.amount,
-    0,
-  );
-  const totalSessionAstroShare = Object.values(sessionCount).reduce(
-    (sum, s) => sum + s.astroShare,
-    0,
-  );
-  const totalSessionCommission = totalSessionAmount - totalSessionAstroShare;
-
-  const settled =
-    adminCredits.find((c) => c._id === Enums.PAYMENT.STATUS.PAID)
-      ?.totalAmount || 0;
-  const unsettled = totalSessionCommission - settled;
-
-  const sessionEarnings = {
-    total: totalSessionAmount,
-    astroShare: totalSessionAstroShare,
-    adminCommission: totalSessionCommission,
-    settled,
-    unsettled,
-  };
-
-  return { sessionCount, liveCount, sessionEarnings };
-}
 async function getPoojaAnalytics(dateFilter = {}) {
   logger.info(`[Pooja Analytics] Start`, { dateFilter });
 
@@ -446,6 +316,196 @@ async function getPoojaAnalytics(dateFilter = {}) {
 
   return { poojaStatus, poojaCount, poojaEarnings };
 }
+async function getSessionAnalytics(dateFilter = {}) {
+  logger.info(`[Session Analytics] Start`, { dateFilter });
+
+  const dateCondition = buildDateCondition(dateFilter);
+  const hasDateFilter = Object.keys(dateCondition).length > 0;
+
+  // ── FIX (date field mismatch): ConsultationSession has no explicit
+  // business date field — it only has the auto `createdAt` (timestamps:
+  // true) — so date filtering on it should use `createdAt`. ──
+  const sessionDateMatch = hasDateFilter ? { createdAt: dateCondition } : {};
+
+  // ── FIX: WalletLedger has an EXPLICIT `timestamp` field, separate from
+  // the auto `createdAt`. The rest of the codebase (dashboard earnings,
+  // recharge summary, GST summary) already filters WalletLedger by
+  // `timestamp`, not `createdAt`. Using `createdAt` here (as the original
+  // code did) can silently diverge from every other ledger-based report
+  // if any entry's timestamp differs from its createdAt. ──
+  const ledgerDateMatch = hasDateFilter ? { timestamp: dateCondition } : {};
+
+  const { COMPLETED } = Enums.SERVICE.STATUS;
+
+  const [
+    sessionStats,
+    liveCount,
+    userDebitSessions,
+    astroCredits,
+    adminCredits,
+  ] = await Promise.all([
+    // ── FIX (the main bug): only COMPLETED sessions should count toward
+    // earnings/duration/count. total_amount and astrologer_share_amount
+    // are written to the document at SESSION CREATION time (before the
+    // astrologer even accepts), so without this filter, PENDING /
+    // CANCELLED / ONGOING sessions were inflating every number below. ──
+    ConsultationSession.aggregate([
+      {
+        $match: {
+          ...sessionDateMatch,
+          status: COMPLETED,
+        },
+      },
+      {
+        $group: {
+          _id: "$mode",
+          count: { $sum: 1 },
+          totalDuration: { $sum: "$duration_minutes" },
+          totalAmount: { $sum: "$total_amount" },
+          totalAstroShare: { $sum: "$astrologer_share_amount" },
+        },
+      },
+    ]),
+
+    ConsultationSession.countDocuments({
+      ...sessionDateMatch,
+      mode: Enums.SERVICE.TYPE.VIDEO,
+      status: COMPLETED,
+    }),
+
+    // Actual money debited from users' wallets for sessions (ledger truth).
+    WalletLedger.aggregate([
+      {
+        $match: {
+          ...ledgerDateMatch,
+          direction: Enums.TRANSACTION.DIRECTION.DEBIT,
+          transaction_type: Enums.TRANSACTION.TYPE.SESSION,
+        },
+      },
+      {
+        $group: {
+          _id: "$payment_status",
+          totalAmount: { $sum: "$final_amount" },
+        },
+      },
+    ]),
+
+    // Actual money credited to astrologers for sessions (ledger truth).
+    // Excludes admin-commission credits so it isn't double-counted with
+    // adminCredits below.
+    WalletLedger.aggregate([
+      {
+        $match: {
+          ...ledgerDateMatch,
+          direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+          transaction_type: Enums.TRANSACTION.TYPE.SESSION,
+          "metadata.is_admin_commission": { $ne: true },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$final_amount" },
+        },
+      },
+    ]),
+
+    // ── FIX: added transaction_type: SESSION so this can no longer pick
+    // up admin-commission ledger entries from pooja bookings / product
+    // orders that also set metadata.is_admin_commission=true. Without
+    // this, `settled`/`unsettled` for sessions were cross-contaminated
+    // with commission from completely unrelated revenue streams. ──
+    WalletLedger.aggregate([
+      {
+        $match: {
+          ...ledgerDateMatch,
+          direction: Enums.TRANSACTION.DIRECTION.CREDIT,
+          transaction_type: Enums.TRANSACTION.TYPE.SESSION, // 🔧 adjust if session admin-commission entries use a different transaction_type in your data
+          "metadata.is_admin_commission": true,
+        },
+      },
+      {
+        $group: {
+          _id: "$payment_status",
+          totalAmount: { $sum: "$final_amount" },
+        },
+      },
+    ]),
+  ]);
+
+  const sessionCount = {
+    CHAT: { count: 0, duration: 0, amount: 0, astroShare: 0 },
+    VIDEO: { count: 0, duration: 0, amount: 0, astroShare: 0 },
+    CALL: { count: 0, duration: 0, amount: 0, astroShare: 0 },
+  };
+
+  sessionStats.forEach((item) => {
+    const key =
+      item._id === Enums.SERVICE.TYPE.CHAT
+        ? "CHAT"
+        : item._id === Enums.SERVICE.TYPE.VIDEO
+          ? "VIDEO"
+          : item._id === Enums.SERVICE.TYPE.CALL
+            ? "CALL"
+            : null;
+
+    if (key) {
+      sessionCount[key] = {
+        count: item.count,
+        duration: item.totalDuration || 0,
+        amount: item.totalAmount || 0,
+        astroShare: item.totalAstroShare || 0,
+      };
+    }
+  });
+
+  const totalSessionAmount = Object.values(sessionCount).reduce(
+    (sum, s) => sum + s.amount,
+    0,
+  );
+  const totalSessionAstroShare = Object.values(sessionCount).reduce(
+    (sum, s) => sum + s.astroShare,
+    0,
+  );
+  const totalSessionCommission = totalSessionAmount - totalSessionAstroShare;
+
+  const settled =
+    adminCredits.find((c) => c._id === Enums.PAYMENT.STATUS.PAID)
+      ?.totalAmount || 0;
+  const unsettled = totalSessionCommission - settled;
+
+  // ── NEW: ledger-verified cross-check. If `matchesSessionTotal` is
+  // false, it tells you (and future debugging) exactly where
+  // ConsultationSession-derived numbers and actual wallet-ledger money
+  // movement diverge, instead of silently hiding it. ──
+  const walletDebitedByUsers = userDebitSessions.reduce(
+    (sum, d) => sum + (d.totalAmount || 0),
+    0,
+  );
+  const walletCreditedToAstrologers = astroCredits?.[0]?.totalAmount || 0;
+
+  const sessionEarnings = {
+    total: totalSessionAmount,
+    astroShare: totalSessionAstroShare,
+    adminCommission: totalSessionCommission,
+    settled,
+    unsettled,
+    ledgerCheck: {
+      walletDebitedByUsers,
+      walletCreditedToAstrologers,
+      matchesSessionTotal: walletDebitedByUsers === totalSessionAmount,
+    },
+  };
+
+  logger.info(`[Session Analytics] Done`, {
+    sessionCount,
+    liveCount,
+    sessionEarnings,
+  });
+
+  return { sessionCount, liveCount, sessionEarnings };
+}
+
 exports.getAdminAstrologerAnalytics = async (dateFilter = {}, adminUserId) => {
   logger.info(`[Admin Analytics] Start`, { dateFilter });
 
