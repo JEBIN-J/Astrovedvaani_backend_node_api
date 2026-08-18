@@ -2,11 +2,20 @@ const mongoose = require("mongoose");
 const Enums = require("../utils/constants");
 
 const carouselBannerSchema = new mongoose.Schema({
-  title: { type: String, default: "" },
+  title: {
+    type: String,
+    default: "",
+  },
 
-  imageUrl: { type: String, required: true },
+  imageUrl: {
+    type: String,
+    required: true,
+  },
 
-  position: { type: Number, required: true },
+  position: {
+    type: Number,
+    required: true,
+  },
 
   bannerType: {
     type: Number,
@@ -46,6 +55,7 @@ const carouselBannerSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+
   isPromotional: {
     type: Boolean,
     default: false,
@@ -66,54 +76,135 @@ function resolveRedirectModel(bannerType) {
   switch (bannerType) {
     case Enums.BANNER_TYPE.POOJA_PAGE:
       return "PoojaMaster";
+
     case Enums.BANNER_TYPE.PRODUCT_PAGE:
       return "Product";
+
     case Enums.BANNER_TYPE.ASTROLOGER_LISTING_PAGE:
       return "Astrologer";
+
     case Enums.BANNER_TYPE.BLOG_PAGE:
       return "Blog";
+
     default:
       return null;
   }
 }
 
+/*
+|--------------------------------------------------------------------------
+| Convert empty redirectId to null
+|--------------------------------------------------------------------------
+*/
+carouselBannerSchema.pre("validate", function (next) {
+  if (this.redirectId === "") {
+    this.redirectId = null;
+  }
+
+  next();
+});
+
+/*
+|--------------------------------------------------------------------------
+| CREATE
+|--------------------------------------------------------------------------
+*/
 carouselBannerSchema.pre("save", function (next) {
-  if (this.bannerType && this.redirectId) {
+  // Empty redirectId should be treated as null
+  if (this.redirectId === "") {
+    this.redirectId = null;
+  }
+
+  // Set redirectModel only when both values exist
+  if (this.bannerType != null && this.redirectId != null) {
     this.redirectModel = resolveRedirectModel(this.bannerType);
   } else {
     this.redirectModel = null;
   }
+
   next();
 });
 
+/*
+|--------------------------------------------------------------------------
+| UPDATE
+|--------------------------------------------------------------------------
+*/
 carouselBannerSchema.pre("findOneAndUpdate", async function (next) {
-  const update = this.getUpdate();
+  try {
+    const update = this.getUpdate();
 
-  // $set support
-  const data = update.$set || update;
+    // Support both:
+    // { $set: {...} }
+    // and
+    // { field: value }
+    const data = update.$set || update;
 
-  // fetch existing document
-  const existing = await this.model.findOne(this.getQuery());
+    /*
+    |--------------------------------------------------------------------------
+    | Convert empty redirectId to null
+    |--------------------------------------------------------------------------
+    */
+    if (data.redirectId === "") {
+      data.redirectId = null;
+    }
 
-  const bannerType =
-    data.bannerType !== undefined ? data.bannerType : existing.bannerType;
+    /*
+    |--------------------------------------------------------------------------
+    | Get existing banner
+    |--------------------------------------------------------------------------
+    */
+    const existing = await this.model.findOne(this.getQuery());
 
-  const redirectId =
-    data.redirectId !== undefined ? data.redirectId : existing.redirectId;
+    /*
+    |--------------------------------------------------------------------------
+    | Get final bannerType
+    |--------------------------------------------------------------------------
+    */
+    const bannerType =
+      data.bannerType !== undefined
+        ? data.bannerType
+        : existing?.bannerType;
 
-  if (bannerType && redirectId) {
-    data.redirectModel = resolveRedirectModel(bannerType);
-  } else {
-    data.redirectModel = null;
+    /*
+    |--------------------------------------------------------------------------
+    | Get final redirectId
+    |--------------------------------------------------------------------------
+    */
+    const redirectId =
+      data.redirectId !== undefined
+        ? data.redirectId
+        : existing?.redirectId;
+
+    /*
+    |--------------------------------------------------------------------------
+    | Set redirectModel
+    |--------------------------------------------------------------------------
+    */
+    if (bannerType != null && redirectId != null) {
+      data.redirectModel = resolveRedirectModel(bannerType);
+    } else {
+      data.redirectModel = null;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Put modified data back into update
+    |--------------------------------------------------------------------------
+    */
+    if (update.$set) {
+      update.$set = data;
+    } else {
+      this.setUpdate(data);
+    }
+
+    next();
+  } catch (error) {
+    next(error);
   }
-
-  if (update.$set) {
-    update.$set = data;
-  } else {
-    this.setUpdate(data);
-  }
-
-  next();
 });
 
-module.exports = mongoose.model("CarouselBanner", carouselBannerSchema);
+module.exports = mongoose.model(
+  "CarouselBanner",
+  carouselBannerSchema
+);

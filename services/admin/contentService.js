@@ -25,23 +25,25 @@ exports.createCarouselBannerService = async (data, user) => {
     throw new BadRequestError("imageUrl and position are required");
   }
 
+  const normalizedRedirectId =
+    typeof redirectId === "string" && redirectId.trim() !== ""
+      ? redirectId.trim()
+      : null;
+
+  const normalizedSlug =
+    typeof slug === "string" && slug.trim() !== ""
+      ? slug.trim()
+      : null;
+
+
   if (bannerType === undefined || bannerType === null) {
-    if (redirectId || slug) {
+    if (normalizedRedirectId || normalizedSlug) {
       throw new BadRequestError(
         "redirectId or slug is not allowed without bannerType",
       );
     }
   }
 
-  if (bannerType !== undefined && bannerType !== null) {
-    if (!redirectId) {
-      throw new BadRequestError(
-        "Either redirectId is required when bannerType is provided",
-      );
-    }
-  }
-
-  // ── Promotional type + date-range validation ──
   let finalStartDate = null;
   let finalEndDate = null;
 
@@ -55,31 +57,49 @@ exports.createCarouselBannerService = async (data, user) => {
     finalStartDate = new Date(startDate);
     finalEndDate = new Date(endDate);
 
-    if (isNaN(finalStartDate.getTime()) || isNaN(finalEndDate.getTime())) {
-      throw new BadRequestError("startDate/endDate must be valid dates");
+    if (
+      isNaN(finalStartDate.getTime()) ||
+      isNaN(finalEndDate.getTime())
+    ) {
+      throw new BadRequestError(
+        "startDate/endDate must be valid dates",
+      );
     }
 
     if (finalStartDate >= finalEndDate) {
-      throw new BadRequestError("endDate must be after startDate");
+      throw new BadRequestError(
+        "endDate must be after startDate",
+      );
     }
   }
+
 
   const banner = new CarouselBanner({
     title: data.title || "",
     imageUrl,
     position,
+
     bannerType: bannerType ?? null,
-    redirectId: redirectId ?? null,
-    slug: slug ?? null,
+
+
+    redirectId: normalizedRedirectId,
+
+    slug: normalizedSlug,
+
     isPromotional: isPromotional === true,
+
     startDate: finalStartDate,
     endDate: finalEndDate,
+
     createdBy: user._id,
   });
 
   return await banner.save();
 };
-const ADMIN_ROLES = [Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN];
+const ADMIN_ROLES = [
+  Enums.USER.ROLE.ADMIN,
+  Enums.USER.ROLE.SUPER_ADMIN,
+];
 
 exports.getCarouselBannersService = async (
   filters,
@@ -88,12 +108,14 @@ exports.getCarouselBannersService = async (
   user = null,
 ) => {
   const role = user?.role;
+  const hasToken = !!user;
 
-  const isAdminOrNoToken = !user || ADMIN_ROLES.includes(role);
+  const isAdminOrNoToken = !hasToken || ADMIN_ROLES.includes(role);
 
   let walletBalance = 0;
 
-  if (!isAdminOrNoToken) {
+  // Get wallet only for normal logged-in users
+  if (hasToken && !ADMIN_ROLES.includes(role)) {
     const wallet = await Wallet.findOne({
       user_id: user._id,
     }).lean();
@@ -103,18 +125,25 @@ exports.getCarouselBannersService = async (
 
   const query = {};
 
+  // isActive filter
   if (filters.isActive !== undefined) {
     query.isActive = filters.isActive === "true";
   }
 
-  if (filters.bannerType !== undefined && filters.bannerType !== "") {
+  // bannerType filter
+  if (
+    filters.bannerType !== undefined &&
+    filters.bannerType !== ""
+  ) {
     query.bannerType = Number(filters.bannerType);
   }
 
+  // redirectId filter
   if (filters.redirectId) {
     query.redirectId = filters.redirectId;
   }
 
+  // slug filter
   if (filters.slug) {
     query.slug = filters.slug;
   }
@@ -123,14 +152,29 @@ exports.getCarouselBannersService = async (
 
   let promotionalFilter = {};
 
-  if (!isAdminOrNoToken) {
+
+  if (!hasToken) {
+    promotionalFilter = {
+      isPromotional: false,
+    };
+  }
+
+
+  else if (ADMIN_ROLES.includes(role)) {
+    promotionalFilter = {};
+  }
+
+
+  else {
     if (walletBalance > 50) {
+
       promotionalFilter = {
         isPromotional: {
           $ne: true,
         },
       };
     } else {
+
       promotionalFilter = {
         $or: [
           {
@@ -154,19 +198,21 @@ exports.getCarouselBannersService = async (
 
   const andConditions = [];
 
-  if (Object.keys(query).length) {
+  // Normal filters
+  if (Object.keys(query).length > 0) {
     andConditions.push(query);
   }
 
-  if (Object.keys(promotionalFilter).length) {
+  // Promotional filter
+  if (Object.keys(promotionalFilter).length > 0) {
     andConditions.push(promotionalFilter);
   }
 
   const finalQuery =
     andConditions.length > 0
       ? {
-          $and: andConditions,
-        }
+        $and: andConditions,
+      }
       : {};
 
   const skip = (page - 1) * limit;
@@ -187,12 +233,17 @@ exports.getCarouselBannersService = async (
     CarouselBanner.countDocuments(finalQuery),
   ]);
 
-  const hasToken = !!user;
-
   const formattedBanners = banners.map(
-    ({ redirectId, redirectModel, isPromotional, ...rest }) => ({
+    ({
+      redirectId,
+      redirectModel,
+      isPromotional,
+      ...rest
+    }) => ({
       ...rest,
-      isPromotional: hasToken ? isPromotional : null,
+
+      isPromotional: hasToken ? isPromotional : false,
+
       redirectData: redirectId || null,
     }),
   );
@@ -220,13 +271,13 @@ exports.updateCarouselBannerService = async (id, updateData) => {
 
   const slug = updateData.slug !== undefined ? updateData.slug : banner.slug;
 
-  if (bannerType !== null) {
-    if (!redirectId && !slug) {
-      throw new BadRequestError(
-        "Either redirectId or slug is required when bannerType is provided",
-      );
-    }
-  }
+  // if (bannerType !== null) {
+  //   if (!redirectId && !slug) {
+  //     throw new BadRequestError(
+  //       "Either redirectId or slug is required when bannerType is provided",
+  //     );
+  //   }
+  // }
 
   let redirectModel = null;
   if (bannerType && redirectId) {
