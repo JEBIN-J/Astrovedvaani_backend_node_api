@@ -385,12 +385,6 @@ function handleChatRequestEvents(socketManager, socket) {
           $set: { lastFreeSessionUsedAt: new Date() },
         });
       }
-      // NOTE: promotionalSessionUsed was already claimed at creation time
-      // (sessionService.createChatSession), NOT here. Whether it actually
-      // ends up "truly used" (i.e. the user goes past their free minutes
-      // and is billed at the promo rate) is decided later, when the
-      // session actually finishes — see reconcilePromotionalUsage() calls
-      // in the finalTimeout below and in chat_session_end / chat_session_extend.
       let astrologer = await getUser(updatedSession.astrologer_user_id);
       if (!astrologer) {
         astrologer = await getUserById(updatedSession.astrologer_user_id);
@@ -443,10 +437,6 @@ function handleChatRequestEvents(socketManager, socket) {
           const statusReason =
             Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
 
-          // ── Promo reconciliation: this timeout only fires if the FULL
-          // allotted duration_minutes actually elapsed (session was never
-          // extended). Compare that to freeDuration to see whether any
-          // promotional minute was really billed. ──
           if (updatedSession.is_promotional) {
             await reconcilePromotionalUsage({
               userId: updatedSession.user_id,

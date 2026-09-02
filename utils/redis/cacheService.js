@@ -73,18 +73,34 @@ class CacheService {
       logger.error("Cache delete error:", err);
     }
   }
+  // static async markAstrologerBusy(astrologerId, sessionId, ttl = 60 * 60) { // 1h
+  //   const key = `astro:busy:${astrologerId}`;
+  //   try {
+  //     await redisClient.setEx(key, ttl, sessionId);
+  //     logger.info(`[CacheService] Marked astrologer ${astrologerId} as BUSY for session ${sessionId} (TTL=${ttl}s)`);
+  //     return true;
+  //   } catch (err) {
+  //     logger.error("[CacheService] Error marking astrologer busy:", err);
+  //     return false;
+  //   }
+  // }
   static async markAstrologerBusy(astrologerId, sessionId, ttl = 60 * 60) { // 1h
     const key = `astro:busy:${astrologerId}`;
     try {
-      await redisClient.setEx(key, ttl, sessionId);
-      logger.info(`[CacheService] Marked astrologer ${astrologerId} as BUSY for session ${sessionId} (TTL=${ttl}s)`);
+      const sessionIdStr =
+        sessionId && typeof sessionId === "object"
+          ? String(sessionId._id ?? sessionId) // handles a full session doc or a bare ObjectId
+          : String(sessionId);
+   
+      await redisClient.setEx(key, ttl, sessionIdStr);
+      logger.info(`[CacheService] Marked astrologer ${astrologerId} as BUSY for session ${sessionIdStr} (TTL=${ttl}s)`);
       return true;
     } catch (err) {
       logger.error("[CacheService] Error marking astrologer busy:", err);
       return false;
     }
   }
-
+ 
   static async clearAstrologerBusy(astrologerId) {
     const key = `astro:busy:${astrologerId}`;
     try {

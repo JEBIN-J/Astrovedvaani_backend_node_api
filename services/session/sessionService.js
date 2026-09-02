@@ -156,49 +156,44 @@ async function createChatSession({
     if (activePromo) {
       const promoRate = Number(activePromo.promoService.promotional_rate);
 
-      // ── FIX: check BEFORE claiming whether the wallet can fund even ONE
-      // minute at the promotional rate. If wallet balance is 0 (or too
-      // low), the user will only ever consume free minutes in this
-      // session — the promo would never actually be used. Do NOT claim
-      // the one-time eligibility in that case. ──
       const promoWalletEligibility =
         await userService.getWalletSessionEligibility(userId, promoRate);
-      const promoMaxDuration = promoWalletEligibility?.maxDuration ?? 0;
 
       logger.info(
-        `[Promotion] userId=${userId} promoRate=${promoRate} promoWalletFundedMinutes=${promoMaxDuration}`,
+        `[Promotion] userId=${userId} promoRate=${promoRate} promoWalletFundedMinutes=${promoWalletEligibility?.maxDuration ?? 0}`,
       );
 
-      if (promoMaxDuration > 0) {
-        const claimed = await claimPromotionalEligibility(userId);
+      // NOTE: hum yahan wallet-funded-minutes pe gate nahi lagate.
+      // Agar active promo hai aur user eligible hai, to promo claim/apply
+      // karte hain — chahe wallet abhi 0 paid minutes fund kar paaye
+      // (e.g. naya user sirf free minutes use karega). Isse free-duration
+      // ki billing/commission bhi promo ke commission_pct se hi calculate
+      // hogi jab tak promotion active hai.
+      //
+      // One-time flag waste nahi hota kyunki reconcilePromotionalUsage()
+      // session end pe check karta hai — agar sirf free minutes hi
+      // consume hue (koi actual promo-rate paid minute nahi), to wo
+      // eligibility wapas release kar deta hai automatically.
+      const claimed = await claimPromotionalEligibility(userId);
 
-        if (claimed) {
-          promoClaimed = true;
-          isPromotional = true;
-          rate = promoRate;
-          commission_pct = Number(activePromo.promoService.commission_pct);
-          promotionId = activePromo.promotion._id;
-          walletEligibility = promoWalletEligibility;
+      if (claimed) {
+        promoClaimed = true;
+        isPromotional = true;
+        rate = promoRate;
+        commission_pct = Number(activePromo.promoService.commission_pct);
+        promotionId = activePromo.promotion._id;
+        walletEligibility = promoWalletEligibility;
 
-          logger.info("[Promotion] Promotional pricing applied & claimed", {
-            userId,
-            astrologerId: astrologer._id,
-            promotionId,
-            rate,
-            promoMaxDuration,
-          });
-        } else {
-          logger.info(
-            `[Promotion] userId=${userId} lost claim race / already used -> falling back to normal pricing`,
-          );
-        }
+        logger.info("[Promotion] Promotional pricing applied & claimed", {
+          userId,
+          astrologerId: astrologer._id,
+          promotionId,
+          rate,
+          promoMaxDuration: promoWalletEligibility?.maxDuration ?? 0,
+        });
       } else {
-        // Wallet can't fund a single promotional minute right now — do
-        // NOT claim, do NOT mark as promotional. User simply gets their
-        // free minutes (and normal pricing for anything beyond that, once
-        // they actually recharge). Their one-time promo stays untouched.
         logger.info(
-          `[Promotion] userId=${userId} has 0 wallet-funded promo minutes (insufficient balance) -> promo NOT claimed, eligibility preserved for later`,
+          `[Promotion] userId=${userId} lost claim race / already used -> falling back to normal pricing`,
         );
       }
     }

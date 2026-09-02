@@ -35,7 +35,7 @@ const validateServices = async (services, astrologers) => {
   }
 
   for (const astrologerId of astrologers) {
-    // Astrologer name fetch karo
+  
     const astrologer =
       await Astrologer.findById(astrologerId).select("display_name");
 
@@ -179,9 +179,9 @@ const updatePromotion = async (
   //   throw new ConflictError("Inactive promotion cannot be updated.");
   // }
 
-  if (promotion.endDate < new Date()) {
-    throw new ConflictError("Expired promotion cannot be updated.");
-  }
+  // if (promotion.endDate < new Date()) {
+  //   throw new ConflictError("Expired promotion cannot be updated.");
+  // }
   if (!finalTitle || !finalTitle.trim()) {
     throw new BadRequestError("Title is required.");
   }

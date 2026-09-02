@@ -75,8 +75,7 @@ async function createLedgerEntriesForSession(sessionId) {
       ]);
       return { success: true, message: "Ledger created for free session" };
     }
-    const { serviceRate } = await getAstrologerDetails(astrologer_user_id);
-    const commissionPct = serviceRate?.commission_pct ?? 0;
+    const commissionPct = Number(session.commission_pct) || 0;
     const astrologerAmount = Number(
       ((commissionPct / 100) * finalAmount).toFixed(2),
     );
@@ -103,6 +102,9 @@ async function createLedgerEntriesForSession(sessionId) {
       astroWallet.save(),
       superAdminWallet.save(),
     ]);
+    logger.info(
+      `[Ledger] sessionId=${sessionId} isPromotional=${session.is_promotional} commission_pct=${commissionPct} finalAmount=${finalAmount} astrologerAmount=${astrologerAmount} superAdminAmount=${superAdminAmount}`,
+    );
     const entries = [
       {
         wallet_id: userWallet._id,
@@ -235,7 +237,6 @@ async function finalizeSession(
     `[Session] Free duration: ${freeDuration}min, Free used: ${freeUsed}min, Billable minutes: ${billableMinutes}min`,
   );
 
-  // --- Financial calculations ---
   const ratePerMin = session.rate_per_minute || 0;
   const commissionPct = session.commission_pct || 0;
   const finalAmount = Number((billableMinutes * ratePerMin).toFixed(2));
