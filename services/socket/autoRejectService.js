@@ -4,7 +4,7 @@ const Enums = require("../../utils/constants");
 const {
   releasePromotionalEligibility, // <-- FIX: needed to roll back a promo claim on auto-reject
 } = require("../../services/session/sessionService");
-
+const CacheService = require("../../utils/redis/cacheService");
 function autoRejectSession(
   sessionId,
   astrologerId,
@@ -32,7 +32,7 @@ function autoRejectSession(
             `[AUTO-REJECT] Released promo eligibility for userId=${session.user_id} — session ${sessionId} auto-rejected (no astrologer response)`,
           );
         }
-
+   
         await ConsultationSession.findByIdAndUpdate(
           sessionId,
           {

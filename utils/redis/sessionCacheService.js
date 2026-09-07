@@ -78,7 +78,8 @@ async function clearSession(sessionId) {
       const busyKey = `${ASTRO_BUSY_PREFIX}${session.astrologer_user_id}`;
 
       // Delete busy flag key
-      await CacheService.del(busyKey);
+      // await CacheService.del(busyKey);
+      await CacheService.clearAstrologerBusy(session.astrologer_user_id)
       logger.info(
         `[SessionCache] Deleted busy flag key=${busyKey} for astrologer ${session.astrologer_user_id}`,
       );
