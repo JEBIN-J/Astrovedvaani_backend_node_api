@@ -12,6 +12,11 @@ const publicRoutes = require("./publicRoutes");
 const authController = require("../controller/authController");
 const ksRoutes = require("./ksRoute");
 
+router.delete('/admin/clear-busy/:astrologerId', async (req, res) => {
+    const CacheService = require('../utils/redis/cacheService');
+    await CacheService.clearAstrologerBusy(req.params.astrologerId);
+    res.json({ success: true });
+});
 router.use("/auth", authRoutes);
 router.use("/admin", adminRoutes);
 router.use("/user", userRoutes);
