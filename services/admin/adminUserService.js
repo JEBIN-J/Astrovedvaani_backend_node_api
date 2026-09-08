@@ -179,9 +179,13 @@ const completeUser = async (userId, data) => {
     }
 
     const userUpdate = {};
-
-    if (data.profilePicture) userUpdate.profilePicture = data.profilePicture;
-    if (data.gender) userUpdate.gender = data.gender;
+      
+  if (data.profilePicture !== undefined) {
+  userUpdate.profilePicture = data.profilePicture;
+}
+ if (data.gender !== undefined) {
+  userUpdate.gender = data.gender;
+}
     if (data.password) {
       const plainPassword = data.password;
       const hashedPassword = await bcrypt.hash(plainPassword, 10);
