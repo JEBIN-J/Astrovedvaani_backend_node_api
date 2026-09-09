@@ -7,7 +7,7 @@ const logger = require("../logger");
 const CacheService = require("./cacheService");
 const redisClient = require("./redisClient");
 const SESSION_PREFIX = "session:active";
-const ASTRO_BUSY_PREFIX = "astrologer:busy:";
+const ASTRO_BUSY_PREFIX = "astro:busy:";
 const USER_PREFIX = "user:info";
 const redis = require("./redisClient");
 
