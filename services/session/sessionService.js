@@ -394,6 +394,17 @@ async function handleAstroShareProcessing({ sessionId, astroShare, isFree }) {
     );
   }
 }
+async function isPromotionStillValid(promotionId) {
+  if (!promotionId) return false;
+  const now = new Date();
+  const promo = await Promotion.findOne({
+    _id: promotionId,
+    isActive: true,
+    startDate: { $lte: now },
+    endDate: { $gte: now },
+  }).lean();
+  return !!promo;
+}
 
 module.exports = {
   createChatSession,
@@ -401,4 +412,5 @@ module.exports = {
   claimPromotionalEligibility,
   releasePromotionalEligibility,
   reconcilePromotionalUsage,
+  isPromotionStillValid
 };

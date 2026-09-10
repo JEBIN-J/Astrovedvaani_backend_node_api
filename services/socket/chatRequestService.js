@@ -544,322 +544,321 @@ function handleChatRequestEvents(socketManager, socket) {
       );
     }
   });
-  socket.on("chat_session_extend", async ({ sessionId }, callback) => {
-    try {
-      const {
-        getSession,
-        updateSession,
-        clearSession,
-      } = require("../../utils/redis/sessionCacheService");
-
-      logger.info(
-        `[SOCKET] chat_session_extend called. sessionId=${sessionId}, userId=${userId}`,
-      );
-
-      const session = await getSession(sessionId);
-
-      if (!session) {
-        return callback?.({
-          success: false,
-          message: "Session not found.",
-        });
-      }
-
-      const userIn = await getInSession(sessionId, session.user_id);
-
-      if (!userIn) {
-        return callback?.({
-          success: false,
-          message: "User is not in session.",
-        });
-      }
-
-      if (session.status !== Enums.SERVICE.STATUS.ONGOING) {
-        return callback?.({
-          success: false,
-          message: "Session is not active.",
-        });
-      }
-
-      const now = new Date();
-
-      if (
-        session.last_extended_at &&
-        now - new Date(session.last_extended_at) < 5000
-      ) {
-        return callback?.({
-          success: false,
-          message: "Please wait before trying to extend again.",
-        });
-      }
-
-      const wallet = await Wallet.findOne({
-        user_id: session.user_id,
-      });
-
-      if (!wallet) {
-        return callback?.({
-          success: false,
-          message: "Wallet not found.",
-        });
-      }
-
-      const elapsedMs = now - new Date(session.start_time);
-
-      const elapsedMinutes = Math.min(
-        Math.ceil(elapsedMs / 60000),
-        session.duration_minutes,
-      );
-
-      const freeDuration = session.freeDuration ?? 0;
-
-      const freeConsumed = Math.min(elapsedMinutes, freeDuration);
-
-      const walletConsumed = Math.max(0, elapsedMinutes - freeConsumed);
-
-      const walletBalance = wallet.balance;
-
-      const ratePerMin = session.rate_per_minute;
-
-      const walletMinutesAvailable = Math.floor(walletBalance / ratePerMin);
-
-      const additionalWalletMinutes = Math.max(
-        0,
-        walletMinutesAvailable - walletConsumed,
-      );
-
-      const totalNewMinutes = elapsedMinutes + additionalWalletMinutes;
-
-      if (totalNewMinutes <= elapsedMinutes) {
-        return callback?.({
-          success: false,
-          message: "Not enough balance to extend session.",
-        });
-      }
-
-      const previousTotalDuration = session.duration_minutes;
-
-      const additionalMinutes = Math.max(
-        totalNewMinutes - previousTotalDuration,
-        0,
-      );
-
-      logger.info(
-        `[EXTEND FIX] previousTotalDuration=${previousTotalDuration}`,
-      );
-
-      logger.info(`[EXTEND FIX] totalNewMinutes=${totalNewMinutes}`);
-
-      logger.info(`[EXTEND FIX] additionalMinutes=${additionalMinutes}`);
-
-      if (additionalMinutes <= 0) {
-        return callback?.({
-          success: false,
-          message: "No additional minutes available.",
-        });
-      }
-
-      let graceTimeMs = 0;
-
-      if (now > new Date(session.end_time)) {
-        graceTimeMs = now - new Date(session.end_time);
-      }
-
-      const totalBufferTime = (session.total_buffer_time || 0) + graceTimeMs;
-
-      console.log(
-        `previous end time: ${session.end_time}, now: ${now}, graceTimeMs: ${graceTimeMs}`,
-      );
-
-      const newEndTime = new Date(
-        new Date(session.end_time).getTime() +
-          additionalMinutes * 60000 +
-          graceTimeMs,
-      );
-
-      console.log(
-        `Grace time (ms): ${graceTimeMs}, New end time: ${newEndTime}`,
-      );
-
-      const updatedSession = await ConsultationSession.findByIdAndUpdate(
-        sessionId,
-        {
-          $set: {
-            duration_minutes: totalNewMinutes,
-
-            end_time: newEndTime,
-
-            last_extended_at: now,
-
-            total_buffer_time: totalBufferTime,
-          },
-        },
-        { new: true },
-      );
-
-      await updateSession(sessionId, updatedSession.toObject());
-
-      const oldTimeouts = socketManager.sessionTimeouts.get(sessionId);
-
-      if (oldTimeouts) {
-        clearTimeout(oldTimeouts.durationTimeout);
-
-        clearTimeout(oldTimeouts.finalTimeout);
-      }
-
-      const bufferMs = 60000;
-
-      const endTimeMs = new Date(updatedSession.end_time).getTime();
-
-      const actualRemainingMs = Math.max(endTimeMs - Date.now(), 0);
-
-      const durationTimeout = setTimeout(() => {
-        logger.info(
-          `[EXTEND TIMER] Session ${sessionId} reached scheduled end time`,
-        );
-
-        console.log(
-          `Emitting session_duration_completed for session ${sessionId} at ${new Date().toISOString()} for astrologer ${session.astrologer_user_id}`,
-        );
-
-        socketManager.io
-          .to(`user_${session.astrologer_user_id}`)
-          .emit("session_duration_completed", {
-            sessionId,
-            timestamp: Date.now(),
-            message:
-              "Session duration completed. Please wait while we process the session.",
-          });
-      }, actualRemainingMs);
-
-      const finalTimeout = setTimeout(async () => {
-        try {
-          const latestSession = await ConsultationSession.findById(sessionId);
-
-          if (!latestSession) return;
-
-          const latestEndTime = new Date(latestSession.end_time).getTime();
-
-          if (Date.now() < latestEndTime + bufferMs) {
-            logger.info(
-              `[EXTEND TIMER] Session extended again. Ignoring old timeout.`,
-            );
-
-            return;
-          }
-
-          await CacheService.clearAstrologerBusy(
-            latestSession.astrologer_user_id,
-          );
-
-          await clearSession(sessionId);
-
-          await clearInSession(sessionId);
-
-          const statusReason =
-            Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
-
-          // ── Promo reconciliation: use the FRESH doc from DB so this
-          // reflects the actual final duration_minutes after any
-          // extension(s), not the stale closure value. ──
-          if (latestSession.is_promotional) {
-            await reconcilePromotionalUsage({
-              userId: latestSession.user_id,
-              isPromotional: true,
-              freeDuration: latestSession.freeDuration || 0,
-              elapsedMinutes: latestSession.duration_minutes,
-              sessionId,
-            });
-          }
-
-          const result = await finalizeSession(
-            sessionId,
-            userId,
-            statusReason,
-            "Auto-ended after extended time",
-          );
-
-          if (result) {
-            socketManager.io
-              .to(`user_${result.session.user_id}`)
-              .emit("chat_auto_completed", {
-                sessionId: result.session._id,
-
-                timestamp: Date.now(),
-
-                message: "Session auto-completed after extended time.",
-              });
-
-            socketManager.io
-              .to(`user_${result.session.astrologer_user_id}`)
-              .emit("chat_auto_completed", {
-                sessionId: result.session._id,
-
-                timestamp: Date.now(),
-
-                message: "Session auto-completed after extended time.",
-              });
-
-            socketManager.clearActiveSession(
-              result.session.user_id,
-              result.session.astrologer_user_id,
-            );
-
-            socketManager.sessionTimeouts.delete(sessionId);
-          }
-        } catch (err) {
-          logger.error(
-            `[EXTEND TIMER] Error finalizing session ${sessionId}:`,
-            err,
-          );
-        }
-      }, actualRemainingMs + bufferMs);
-
-      socketManager.sessionTimeouts.set(sessionId, {
-        durationTimeout,
-        finalTimeout,
-      });
-
-      const payload = {
-        sessionId,
-
-        additionalMinutes,
-
-        totalDuration: updatedSession.duration_minutes,
-
-        remainingMinutes: totalNewMinutes - elapsedMinutes,
-
-        timestamp: Date.now(),
-
-        message: `Session extended by ${additionalMinutes} minutes.`,
-
-        channelId: updatedSession.mode,
-      };
-
-      socketManager.io
-        .to(`user_${updatedSession.astrologer_user_id}`)
-        .emit("chat_session_extended", payload);
-
-      return callback?.({
-        success: true,
-
-        additionalMinutes,
-
-        totalDuration: updatedSession.duration_minutes,
-
-        remainingMinutes: totalNewMinutes - elapsedMinutes,
-
-        sessionId,
-      });
-    } catch (err) {
-      logger.error("[SOCKET] chat_session_extend error:", err);
-
+socket.on("chat_session_extend", async ({ sessionId }, callback) => {
+  try {
+    const {
+      getSession,
+      updateSession,
+      clearSession,
+    } = require("../../utils/redis/sessionCacheService");
+    const {
+      getAstrologerDetails,
+    } = require("../../services/session/astrologerService");
+    const {
+      applyOffersOnRates,
+    } = require("../astrologer/astrologerOfferService");
+
+    logger.info(
+      `[SOCKET] chat_session_extend called. sessionId=${sessionId}, userId=${userId}`,
+    );
+
+    const session = await getSession(sessionId);
+
+    if (!session) {
+      return callback?.({ success: false, message: "Session not found." });
+    }
+
+    const userIn = await getInSession(sessionId, session.user_id);
+    if (!userIn) {
+      return callback?.({ success: false, message: "User is not in session." });
+    }
+
+    if (session.status !== Enums.SERVICE.STATUS.ONGOING) {
+      return callback?.({ success: false, message: "Session is not active." });
+    }
+
+    const now = new Date();
+
+    if (
+      session.last_extended_at &&
+      now - new Date(session.last_extended_at) < 5000
+    ) {
       return callback?.({
         success: false,
-        message: "Failed to extend session.",
+        message: "Please wait before trying to extend again.",
       });
     }
-  });
+
+    const wallet = await Wallet.findOne({ user_id: session.user_id });
+    if (!wallet) {
+      return callback?.({ success: false, message: "Wallet not found." });
+    }
+
+    // Promo never re-applies on extension — always use current normal rate
+    // for any NEW minutes being added beyond what's already granted.
+    const astrologerDetails = await getAstrologerDetails(
+      session.astrologer_user_id,
+      { service_type: session.mode },
+    );
+
+    if (!astrologerDetails?.serviceRate?.rate) {
+      return callback?.({
+        success: false,
+        message: "Unable to resolve rate for extension.",
+      });
+    }
+
+    const [pricing] = await applyOffersOnRates(
+      astrologerDetails.astrologer._id,
+      [astrologerDetails.serviceRate],
+    );
+
+    if (!pricing || isNaN(pricing.final_rate) || pricing.final_rate <= 0) {
+      return callback?.({
+        success: false,
+        message: "Unable to resolve rate for extension.",
+      });
+    }
+
+    const newRatePerMin = Number(pricing.final_rate); // rate for FUTURE (new) minutes
+    const oldRatePerMin = session.rate_per_minute;     // rate at which ALREADY-GRANTED wallet minutes were reserved
+
+    // ───────────────────────────────────────────────────────────
+    // FIX: normal commission_pct bhi resolve karo — serviceRate se,
+    // promo se NAHI. Promo commission (e.g. 50%) sirf session creation
+    // ke waqt applicable tha; extend pe naye normal-rate minutes ka
+    // commission bhi normal (e.g. 10%) hona chahiye. Isse commission_pct
+    // ko DB me update karke finalizeSession/ledger sahi (normal) %
+    // use karenge, purana promo % nahi.
+    // ───────────────────────────────────────────────────────────
+    const newCommissionPct = Number(
+      astrologerDetails.serviceRate.commission_pct,
+    );
+
+    const wasPromotional = !!session.is_promotional;
+
+    if (wasPromotional) {
+      logger.info(
+        `[EXTEND] Session ${sessionId} was promotional at creation ` +
+        `(old rate ₹${oldRatePerMin}, old commission ${session.commission_pct}%). ` +
+        `Promo does NOT apply to extension — new minutes billed at normal rate ` +
+        `₹${newRatePerMin}/min with normal commission ${newCommissionPct}%.`,
+      );
+    }
+
+    const previousTotalDuration = session.duration_minutes; // total minutes GRANTED so far (free + wallet)
+    const freeDuration = session.freeDuration ?? 0;
+
+    // ───────────────────────────────────────────────────────────
+    // Use GRANTED wallet minutes (previousTotalDuration - freeDuration),
+    // NOT time-elapsed-consumed minutes. A wallet-funded minute is
+    // "committed" the moment it's granted, regardless of whether the
+    // user has actually reached that point in time yet.
+    // ───────────────────────────────────────────────────────────
+    const alreadyGrantedWalletMinutes = Math.max(
+      0,
+      previousTotalDuration - freeDuration,
+    );
+
+    const walletMoneyAlreadyCommitted =
+      alreadyGrantedWalletMinutes * oldRatePerMin;
+
+    const walletBalance = wallet.balance;
+    const remainingWalletBalance = Math.max(
+      0,
+      walletBalance - walletMoneyAlreadyCommitted,
+    );
+
+    const additionalWalletMinutes = Math.floor(
+      remainingWalletBalance / newRatePerMin,
+    );
+
+    const totalNewMinutes = previousTotalDuration + additionalWalletMinutes;
+
+    logger.info(
+      `[EXTEND FIX] walletBalance=${walletBalance} previousTotalDuration=${previousTotalDuration} ` +
+      `freeDuration=${freeDuration} alreadyGrantedWalletMinutes=${alreadyGrantedWalletMinutes} ` +
+      `oldRatePerMin=${oldRatePerMin} walletMoneyAlreadyCommitted=${walletMoneyAlreadyCommitted} ` +
+      `remainingWalletBalance=${remainingWalletBalance} newRatePerMin=${newRatePerMin} ` +
+      `additionalWalletMinutes=${additionalWalletMinutes} newCommissionPct=${newCommissionPct}`,
+    );
+
+    const additionalMinutes = additionalWalletMinutes;
+
+    if (additionalMinutes <= 0) {
+      return callback?.({
+        success: false,
+        message: "Not enough balance to extend session.",
+      });
+    }
+
+    logger.info(`[EXTEND FIX] totalNewMinutes=${totalNewMinutes}`);
+    logger.info(`[EXTEND FIX] additionalMinutes=${additionalMinutes}`);
+
+    let graceTimeMs = 0;
+    if (now > new Date(session.end_time)) {
+      graceTimeMs = now - new Date(session.end_time);
+    }
+
+    const totalBufferTime = (session.total_buffer_time || 0) + graceTimeMs;
+
+    const newEndTime = new Date(
+      new Date(session.end_time).getTime() +
+        additionalMinutes * 60000 +
+        graceTimeMs,
+    );
+
+    const updatedSession = await ConsultationSession.findByIdAndUpdate(
+      sessionId,
+      {
+        $set: {
+          duration_minutes: totalNewMinutes,
+          end_time: newEndTime,
+          last_extended_at: now,
+          total_buffer_time: totalBufferTime,
+          rate_per_minute: newRatePerMin, // future billing rate
+          commission_pct: newCommissionPct, // ← FIX: normal commission ab persist hoga
+          total_amount: Number(
+            (
+              (session.total_amount || 0) +
+              additionalMinutes * newRatePerMin
+            ).toFixed(2),
+          ),
+        },
+      },
+      { new: true },
+    );
+
+    await updateSession(sessionId, updatedSession.toObject());
+
+    const oldTimeouts = socketManager.sessionTimeouts.get(sessionId);
+    if (oldTimeouts) {
+      clearTimeout(oldTimeouts.durationTimeout);
+      clearTimeout(oldTimeouts.finalTimeout);
+    }
+
+    const bufferMs = 60000;
+    const endTimeMs = new Date(updatedSession.end_time).getTime();
+    const actualRemainingMs = Math.max(endTimeMs - Date.now(), 0);
+
+    const durationTimeout = setTimeout(() => {
+      logger.info(
+        `[EXTEND TIMER] Session ${sessionId} reached scheduled end time`,
+      );
+      socketManager.io
+        .to(`user_${session.astrologer_user_id}`)
+        .emit("session_duration_completed", {
+          sessionId,
+          timestamp: Date.now(),
+          message:
+            "Session duration completed. Please wait while we process the session.",
+        });
+    }, actualRemainingMs);
+
+    const finalTimeout = setTimeout(async () => {
+      try {
+        const latestSession = await ConsultationSession.findById(sessionId);
+        if (!latestSession) return;
+
+        const latestEndTime = new Date(latestSession.end_time).getTime();
+        if (Date.now() < latestEndTime + bufferMs) {
+          logger.info(
+            `[EXTEND TIMER] Session extended again. Ignoring old timeout.`,
+          );
+          return;
+        }
+
+        await CacheService.clearAstrologerBusy(
+          latestSession.astrologer_user_id,
+        );
+        await clearSession(sessionId);
+        await clearInSession(sessionId);
+
+        const statusReason =
+          Enums.SERVICE.STATUS_REASON.COMPLETED.DURATION_EXPIRED;
+
+        if (latestSession.is_promotional) {
+          await reconcilePromotionalUsage({
+            userId: latestSession.user_id,
+            isPromotional: true,
+            freeDuration: latestSession.freeDuration || 0,
+            elapsedMinutes: latestSession.duration_minutes,
+            sessionId,
+          });
+        }
+
+        const result = await finalizeSession(
+          sessionId,
+          userId,
+          statusReason,
+          "Auto-ended after extended time",
+        );
+
+        if (result) {
+          socketManager.io
+            .to(`user_${result.session.user_id}`)
+            .emit("chat_auto_completed", {
+              sessionId: result.session._id,
+              timestamp: Date.now(),
+              message: "Session auto-completed after extended time.",
+            });
+
+          socketManager.io
+            .to(`user_${result.session.astrologer_user_id}`)
+            .emit("chat_auto_completed", {
+              sessionId: result.session._id,
+              timestamp: Date.now(),
+              message: "Session auto-completed after extended time.",
+            });
+
+          socketManager.clearActiveSession(
+            result.session.user_id,
+            result.session.astrologer_user_id,
+          );
+          socketManager.sessionTimeouts.delete(sessionId);
+        }
+      } catch (err) {
+        logger.error(
+          `[EXTEND TIMER] Error finalizing session ${sessionId}:`,
+          err,
+        );
+      }
+    }, actualRemainingMs + bufferMs);
+
+    socketManager.sessionTimeouts.set(sessionId, {
+      durationTimeout,
+      finalTimeout,
+    });
+
+    const payload = {
+      sessionId,
+      additionalMinutes,
+      totalDuration: updatedSession.duration_minutes,
+      remainingMinutes: additionalMinutes,
+      timestamp: Date.now(),
+      message: `Session extended by ${additionalMinutes} minutes.`,
+      channelId: updatedSession.mode,
+    };
+
+    socketManager.io
+      .to(`user_${updatedSession.astrologer_user_id}`)
+      .emit("chat_session_extended", payload);
+
+    return callback?.({
+      success: true,
+      additionalMinutes,
+      totalDuration: updatedSession.duration_minutes,
+      remainingMinutes: additionalMinutes,
+      sessionId,
+    });
+  } catch (err) {
+    logger.error("[SOCKET] chat_session_extend error:", err);
+    return callback?.({
+      success: false,
+      message: "Failed to extend session.",
+    });
+  }
+});
   socket.on("chat_request_reject", async ({ sessionId, reason }, callback) => {
     try {
       const {
