@@ -594,71 +594,84 @@ socket.on("chat_session_extend", async ({ sessionId }, callback) => {
       return callback?.({ success: false, message: "Wallet not found." });
     }
 
-    // Promo never re-applies on extension — always use current normal rate
-    // for any NEW minutes being added beyond what's already granted.
-    const astrologerDetails = await getAstrologerDetails(
-      session.astrologer_user_id,
-      { service_type: session.mode },
-    );
-
-    if (!astrologerDetails?.serviceRate?.rate) {
-      return callback?.({
-        success: false,
-        message: "Unable to resolve rate for extension.",
-      });
-    }
-
-    const [pricing] = await applyOffersOnRates(
-      astrologerDetails.astrologer._id,
-      [astrologerDetails.serviceRate],
-    );
-
-    if (!pricing || isNaN(pricing.final_rate) || pricing.final_rate <= 0) {
-      return callback?.({
-        success: false,
-        message: "Unable to resolve rate for extension.",
-      });
-    }
-
-    const newRatePerMin = Number(pricing.final_rate); // rate for FUTURE (new) minutes
-    const oldRatePerMin = session.rate_per_minute;     // rate at which ALREADY-GRANTED wallet minutes were reserved
-
-    // ───────────────────────────────────────────────────────────
-    // FIX: normal commission_pct bhi resolve karo — serviceRate se,
-    // promo se NAHI. Promo commission (e.g. 50%) sirf session creation
-    // ke waqt applicable tha; extend pe naye normal-rate minutes ka
-    // commission bhi normal (e.g. 10%) hona chahiye. Isse commission_pct
-    // ko DB me update karke finalizeSession/ledger sahi (normal) %
-    // use karenge, purana promo % nahi.
-    // ───────────────────────────────────────────────────────────
-    const newCommissionPct = Number(
-      astrologerDetails.serviceRate.commission_pct,
-    );
-
+    const oldRatePerMin = session.rate_per_minute;     // BLENDED rate so far
+    const oldCommissionPct = session.commission_pct;   // BLENDED commission so far
     const wasPromotional = !!session.is_promotional;
-
-    if (wasPromotional) {
-      logger.info(
-        `[EXTEND] Session ${sessionId} was promotional at creation ` +
-        `(old rate ₹${oldRatePerMin}, old commission ${session.commission_pct}%). ` +
-        `Promo does NOT apply to extension — new minutes billed at normal rate ` +
-        `₹${newRatePerMin}/min with normal commission ${newCommissionPct}%.`,
-      );
-    }
 
     const previousTotalDuration = session.duration_minutes; // total minutes GRANTED so far (free + wallet)
     const freeDuration = session.freeDuration ?? 0;
 
-    // ───────────────────────────────────────────────────────────
-    // Use GRANTED wallet minutes (previousTotalDuration - freeDuration),
-    // NOT time-elapsed-consumed minutes. A wallet-funded minute is
-    // "committed" the moment it's granted, regardless of whether the
-    // user has actually reached that point in time yet.
-    // ───────────────────────────────────────────────────────────
+    // Already-granted WALLET (paid) minutes so far — excludes free minutes.
     const alreadyGrantedWalletMinutes = Math.max(
       0,
       previousTotalDuration - freeDuration,
     );
+
+    // ───────────────────────────────────────────────────────────
+    // FIX: If this session was created as promotional AND no paid
+    // (wallet) minute has actually been billed yet (user has only
+    // consumed free minutes so far), the promo hasn't been "used" for
+    // billing purposes. In that case, keep extending at the ORIGINAL
+    // promotional rate/commission instead of re-resolving via
+    // getAstrologerDetails/applyOffersOnRates — which can incorrectly
+    // resolve to the astrologer's normal (non-promo) rate once the
+    // offer is considered consumed at session creation.
+    //
+    // Once at least 1 paid minute has been billed under this session,
+    // we fall back to the original behavior of resolving the live
+    // rate (normal/offer) for the extension.
+    // ───────────────────────────────────────────────────────────
+    let newRatePerMin;
+    let newCommissionPct;
+
+    if (wasPromotional && alreadyGrantedWalletMinutes === 0) {
+      newRatePerMin = Number(oldRatePerMin);
+      newCommissionPct = Number(oldCommissionPct);
+
+      logger.info(
+        `[EXTEND] Session ${sessionId} is promotional and no paid minutes have ` +
+        `been billed yet (only free minutes consumed). Using original promotional ` +
+        `rate ₹${newRatePerMin}/min (commission ${newCommissionPct}%) for this extension ` +
+        `instead of re-resolving the live rate.`,
+      );
+    } else {
+      const astrologerDetails = await getAstrologerDetails(
+        session.astrologer_user_id,
+        { service_type: session.mode },
+      );
+
+      if (!astrologerDetails?.serviceRate?.rate) {
+        return callback?.({
+          success: false,
+          message: "Unable to resolve rate for extension.",
+        });
+      }
+
+      const [pricing] = await applyOffersOnRates(
+        astrologerDetails.astrologer._id,
+        [astrologerDetails.serviceRate],
+      );
+
+      if (!pricing || isNaN(pricing.final_rate) || pricing.final_rate <= 0) {
+        return callback?.({
+          success: false,
+          message: "Unable to resolve rate for extension.",
+        });
+      }
+
+      newRatePerMin = Number(pricing.final_rate); // rate for FUTURE (new) minutes
+      newCommissionPct = Number(astrologerDetails.serviceRate.commission_pct);
+
+      if (wasPromotional) {
+        logger.info(
+          `[EXTEND] Session ${sessionId} was promotional at creation ` +
+          `(blended-so-far rate ₹${oldRatePerMin}, commission ${oldCommissionPct}%), ` +
+          `but ${alreadyGrantedWalletMinutes} paid minute(s) already billed. ` +
+          `New minutes billed at live rate ₹${newRatePerMin}/min, commission ${newCommissionPct}%. ` +
+          `Rate/commission fields will be re-blended (weighted average), not overwritten.`,
+        );
+      }
+    }
 
     const walletMoneyAlreadyCommitted =
       alreadyGrantedWalletMinutes * oldRatePerMin;
@@ -680,7 +693,7 @@ socket.on("chat_session_extend", async ({ sessionId }, callback) => {
       `freeDuration=${freeDuration} alreadyGrantedWalletMinutes=${alreadyGrantedWalletMinutes} ` +
       `oldRatePerMin=${oldRatePerMin} walletMoneyAlreadyCommitted=${walletMoneyAlreadyCommitted} ` +
       `remainingWalletBalance=${remainingWalletBalance} newRatePerMin=${newRatePerMin} ` +
-      `additionalWalletMinutes=${additionalWalletMinutes} newCommissionPct=${newCommissionPct}`,
+      `additionalWalletMinutes=${additionalWalletMinutes}`,
     );
 
     const additionalMinutes = additionalWalletMinutes;
@@ -694,6 +707,51 @@ socket.on("chat_session_extend", async ({ sessionId }, callback) => {
 
     logger.info(`[EXTEND FIX] totalNewMinutes=${totalNewMinutes}`);
     logger.info(`[EXTEND FIX] additionalMinutes=${additionalMinutes}`);
+
+    // ───────────────────────────────────────────────────────────
+    // Existing FIX (unchanged, no schema change): Instead of OVERWRITING
+    // rate_per_minute / commission_pct with the new values (which could
+    // silently discard a higher promo/old commission), compute a
+    // WEIGHTED-AVERAGE (blended) rate and commission across old-granted
+    // minutes + new minutes, and store THAT blended value in the existing
+    // fields.
+    //
+    // Because blendedRate × totalPaidMinutes == totalAmount exactly, and
+    // blendedCommissionPct is money-weighted, the existing single-field
+    // formula in ledgerService (finalAmount = minutes × rate_per_minute,
+    // astroShare = finalAmount × commission_pct / 100) will now produce
+    // the mathematically correct astrologer share across all segments —
+    // without needing any billing_segments array or model change.
+    // ───────────────────────────────────────────────────────────
+    const oldPaidMinutes = alreadyGrantedWalletMinutes;
+    const oldAmount = oldPaidMinutes * oldRatePerMin;
+    const oldCommissionMoney = (oldAmount * oldCommissionPct) / 100;
+
+    const newAmount = additionalMinutes * newRatePerMin;
+    const newCommissionMoney = (newAmount * newCommissionPct) / 100;
+
+    const totalPaidMinutes = oldPaidMinutes + additionalMinutes;
+    const totalAmountForPaidMinutes = oldAmount + newAmount;
+    const totalCommissionMoney = oldCommissionMoney + newCommissionMoney;
+
+    const blendedRatePerMin =
+      totalPaidMinutes > 0
+        ? Number((totalAmountForPaidMinutes / totalPaidMinutes).toFixed(4))
+        : newRatePerMin;
+
+    const blendedCommissionPct =
+      totalAmountForPaidMinutes > 0
+        ? Number(
+            ((totalCommissionMoney / totalAmountForPaidMinutes) * 100).toFixed(4),
+          )
+        : newCommissionPct;
+
+    logger.info(
+      `[EXTEND BLEND] oldPaidMinutes=${oldPaidMinutes} oldAmount=${oldAmount} oldCommissionMoney=${oldCommissionMoney} ` +
+      `newAmount=${newAmount} newCommissionMoney=${newCommissionMoney} totalPaidMinutes=${totalPaidMinutes} ` +
+      `totalAmountForPaidMinutes=${totalAmountForPaidMinutes} totalCommissionMoney=${totalCommissionMoney} ` +
+      `blendedRatePerMin=${blendedRatePerMin} blendedCommissionPct=${blendedCommissionPct}`,
+    );
 
     let graceTimeMs = 0;
     if (now > new Date(session.end_time)) {
@@ -716,12 +774,12 @@ socket.on("chat_session_extend", async ({ sessionId }, callback) => {
           end_time: newEndTime,
           last_extended_at: now,
           total_buffer_time: totalBufferTime,
-          rate_per_minute: newRatePerMin, // future billing rate
-          commission_pct: newCommissionPct, // ← FIX: normal commission ab persist hoga
+          rate_per_minute: blendedRatePerMin,       // blended, not overwritten
+          commission_pct: blendedCommissionPct,     // blended, not overwritten
           total_amount: Number(
             (
               (session.total_amount || 0) +
-              additionalMinutes * newRatePerMin
+              newAmount
             ).toFixed(2),
           ),
         },
