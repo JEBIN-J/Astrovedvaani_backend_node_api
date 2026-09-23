@@ -12,6 +12,7 @@ const User = require("../../models/User");
 const logger = require("../../utils/logger");
 const { applyOffersOnRates } = require("../astrologer/astrologerOfferService");
 const Promotion = require("../../models/AstrologerPromotion");
+const WalletLedger = require("../../models/WalletLedger");
 
 async function getActivePromotion(astrologerId, serviceType) {
   const now = new Date();
@@ -143,15 +144,33 @@ async function createChatSession({
     let promotionId = null;
     let walletEligibility = null;
 
-    const promoEligible = isUserEligibleForPromotion(user);
-    logger.info(
-      `[Promotion] userId=${userId} promotionalSessionUsed=${user.promotionalSessionUsed} promoEligible=${promoEligible}`,
-    );
+   const promoEligible = isUserEligibleForPromotion(user);
 
-    let activePromo = null;
-    if (promoEligible) {
-      activePromo = await getActivePromotion(astrologer._id, mode);
-    }
+logger.info(
+  `[Promotion] userId=${userId} promotionalSessionUsed=${user.promotionalSessionUsed} promoEligible=${promoEligible}`,
+);
+
+const latestRecharge = await WalletLedger.findOne({
+  user: userId,
+  type: "RECHARGE",
+  status: "SUCCESS",
+}).sort({ createdAt: -1 });
+
+const rechargeAmount = Number(latestRecharge?.amount || 0);
+
+logger.info(
+  `[Promotion] userId=${userId} latestSuccessfulRecharge=${rechargeAmount}`,
+);
+
+let activePromo = null;
+
+if (promoEligible && rechargeAmount <= 50) {
+  activePromo = await getActivePromotion(astrologer._id, mode);
+} else if (rechargeAmount > 50) {
+  logger.info(
+    `[Promotion] Skipped for userId=${userId} because latest recharge ₹${rechargeAmount} > ₹50`,
+  );
+}
 
     if (activePromo) {
       const promoRate = Number(activePromo.promoService.promotional_rate);
