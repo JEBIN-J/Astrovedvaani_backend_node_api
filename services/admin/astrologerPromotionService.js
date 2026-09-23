@@ -23,7 +23,10 @@ const validateServices = async (services, astrologers) => {
       throw new BadRequestError("Promotional rate cannot be negative.");
     }
 
-    if (service.promotional_minutes <= 0) {
+    if (
+      !Number.isFinite(Number(service.promotional_minutes)) ||
+      Number(service.promotional_minutes) <= 0
+    ) {
       throw new BadRequestError(
         "Promotional minutes should be greater than zero.",
       );
@@ -35,7 +38,7 @@ const validateServices = async (services, astrologers) => {
   }
 
   for (const astrologerId of astrologers) {
-  
+
     const astrologer =
       await Astrologer.findById(astrologerId).select("display_name");
 

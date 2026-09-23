@@ -14,6 +14,12 @@ const promotionServiceSchema = new Schema(
       required: true,
       min: 0,
     },
+    
+      promotional_minutes: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
 
     commission_pct: {
       type: Number,
