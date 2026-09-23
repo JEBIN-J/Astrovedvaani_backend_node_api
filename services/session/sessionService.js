@@ -12,7 +12,8 @@ const User = require("../../models/User");
 const logger = require("../../utils/logger");
 const { applyOffersOnRates } = require("../astrologer/astrologerOfferService");
 const Promotion = require("../../models/AstrologerPromotion");
-const WalletLedger = require("../../models/WalletLedger");
+const WalletLedger = require("../../models/Ledger");
+
 
 async function getActivePromotion(astrologerId, serviceType) {
   const now = new Date();
