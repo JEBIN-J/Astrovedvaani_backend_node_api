@@ -20,7 +20,7 @@ require("./schedule/astrologerActivity");
 app.use(express.static(__dirname + "/public"));
 // server.js
 
-const { startSalarySlipCron } = require("./schedule/salarySlipService");
+const { startSalarySlipCron } = require("./services/salarySlipService");
 
 startSalarySlipCron();
 

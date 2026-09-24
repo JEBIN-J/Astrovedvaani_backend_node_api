@@ -37,80 +37,133 @@ exports.getAstrologers = asyncHandler(async (req, res) => {
     } = req.query;
 
     const userId = req.user?._id || null;
+
     const parsedLimit = Math.min(Number(limit), 50);
+
     if (isNaN(parsedLimit)) {
       return res.status(400).json({
         success: false,
         message: "Invalid limit parameter",
       });
     }
-    const targetServiceType = serviceType ? parseInt(serviceType) : Enums.SERVICE.TYPE.CHAT;
+
+    const targetServiceType = serviceType
+      ? parseInt(serviceType)
+      : Enums.SERVICE.TYPE.CHAT;
+
     const filters = {
       ...(is_online !== undefined && {
         "astrologer.is_online": is_online === "true",
       }),
+
       ...(is_busy !== undefined && {
         "astrologer.is_busy": is_busy === "true",
       }),
+
       ...(is_premium !== undefined && {
         "astrologer.is_premium": is_premium === "true",
       }),
+
       ...(languages && {
         "astrologer.languages_spoken": {
-          $in: languages.split(",").map(id => new Types.ObjectId(id))
+          $in: languages.split(",").map((id) => new Types.ObjectId(id)),
         },
       }),
+
       ...(specializations && {
         "astrologer.specializations": {
-          $in: specializations.split(",").map(id => new Types.ObjectId(id))
+          $in: specializations.split(",").map((id) => new Types.ObjectId(id)),
         },
       }),
-      ...(minRating && { ratings_avg: { $gte: parseFloat(minRating) } }),
+
+      ...(minRating && {
+        ratings_avg: {
+          $gte: parseFloat(minRating),
+        },
+      }),
+
       "service_rates.service_type": targetServiceType,
-      ...(is_free !== undefined && { is_free: is_free === "true" }),
+
+      ...(is_free !== undefined && {
+        is_free: is_free === "true",
+      }),
     };
 
-    const { data: staticAstrologers, pagination } = await userService.fetchAstrologers({
-      limit: parsedLimit,
-      cursor,
-      filters,
-      sortPrice,
-      sortExperience,
-      sortRating,
-      gender,
-      search,
-      userId,
-      targetServiceType,
-    });
+    const { data: staticAstrologers, pagination } =
+      await userService.fetchAstrologers({
+        limit: parsedLimit,
+        cursor,
+        filters,
+        sortPrice,
+        sortExperience,
+        sortRating,
+        gender,
+        search,
+        userId,
+        targetServiceType,
+      });
 
-    let cachedSpecializations = await CacheService.get(CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations");
+    let cachedSpecializations = await CacheService.get(
+      CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations",
+    );
+
     if (!cachedSpecializations) {
-      cachedSpecializations = await getAllSpecializations({ page: 1, limit: 1000 });
-      await CacheService.set(CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations", cachedSpecializations);
+      cachedSpecializations = await getAllSpecializations({
+        page: 1,
+        limit: 1000,
+      });
+
+      await CacheService.set(
+        CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations",
+        cachedSpecializations,
+      );
     }
 
-    let cachedLanguages = await CacheService.get(CacheService.CACHE_PREFIXES.USERS_LIST + ":languages");
+    let cachedLanguages = await CacheService.get(
+      CacheService.CACHE_PREFIXES.USERS_LIST + ":languages",
+    );
+
     if (!cachedLanguages) {
-      cachedLanguages = await getAllLanguages({ page: 1, limit: 1000 });
-      await CacheService.set(CacheService.CACHE_PREFIXES.USERS_LIST + ":languages", cachedLanguages);
+      cachedLanguages = await getAllLanguages({
+        page: 1,
+        limit: 1000,
+      });
+
+      await CacheService.set(
+        CacheService.CACHE_PREFIXES.USERS_LIST + ":languages",
+        cachedLanguages,
+      );
     }
 
     const populatedData = await Promise.all(
       staticAstrologers.map(async (astro) => {
-        const specializationsPop = astro.astrologer.specializations.map(id => {
-          const s = cachedSpecializations?.data?.find(x => x._id.toString() === id.toString());
-          return s ? s.name : null;
-        }).filter(Boolean);
+        const specializationsPop = astro.astrologer.specializations
+          .map((id) => {
+            const s = cachedSpecializations?.data?.find(
+              (x) => x._id.toString() === id.toString(),
+            );
 
-        const languagesPop = astro.astrologer.languages_spoken.map(id => {
-          const l = cachedLanguages?.data?.find(x => x._id.toString() === id.toString());
-          return l ? l.name : null;
-        }).filter(Boolean);
+            return s ? s.name : null;
+          })
+          .filter(Boolean);
+
+        const languagesPop = astro.astrologer.languages_spoken
+          .map((id) => {
+            const l = cachedLanguages?.data?.find(
+              (x) => x._id.toString() === id.toString(),
+            );
+
+            return l ? l.name : null;
+          })
+          .filter(Boolean);
 
         const isBusy = await checkAstrologerBusy(astro.astrologer.user_id);
-        //const isBusy = astro.astrologer.is_busy;
+
+        // const isBusy = astro.astrologer.is_busy;
+
         return {
           ...astro,
+
           astrologer: {
             ...astro.astrologer,
             specializations: specializationsPop,
@@ -118,29 +171,44 @@ exports.getAstrologers = asyncHandler(async (req, res) => {
             is_busy: isBusy,
           },
         };
-      })
+      }),
     );
 
-    // ── sort by live status: online first, then busy, then offline ──
+    // ── Sort by live status ──
+    // Selected service priority is already calculated
+    // inside fetchAstrologers().
+    //
+    // online + not busy -> first
+    // online + busy     -> second
+    // offline           -> last
+    //
+    // JavaScript stable sort preserves the service priority
+    // calculated by fetchAstrologers() within the same group.
+
     populatedData.sort((a, b) => {
       const order = (astro) => {
-  if (astro.astrologer.is_online && !astro.astrologer.is_busy) return 0;
-  if (astro.astrologer.is_online && astro.astrologer.is_busy) return 1; // online but busy
-  return 2; // offline (regardless of is_busy)
-};
-      // const order = (astro) => {
-      //   if (astro.astrologer.is_online && !astro.astrologer.is_busy) return 0;
-      //   if (astro.astrologer.is_busy) return 1;
-      //   return 2;
-      // };
+        if (astro.astrologer.is_online && !astro.astrologer.is_busy) {
+          return 0;
+        }
+
+        if (astro.astrologer.is_online && astro.astrologer.is_busy) {
+          return 1;
+        }
+
+        return 2;
+      };
+
       return order(a) - order(b);
     });
 
     res.status(200).json({
       success: true,
+
       data: populatedData,
+
       meta: {
         count: populatedData.length,
+
         pagination: {
           next_cursor: pagination.nextCursor,
           has_more: pagination.hasMore,
@@ -150,6 +218,7 @@ exports.getAstrologers = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     logger.error("Failed to get astrologers", error);
+
     res.status(500).json({
       success: false,
       message: "Internal server error",

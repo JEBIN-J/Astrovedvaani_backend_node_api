@@ -401,23 +401,29 @@ async function fetchUsersWithDetails(
     sortOrder = "desc",
     searchTerm,
     exportCsv = false,
-    hasServiceRate = false,
+    isOnline, 
   } = options;
 
   const pipeline = [];
+
   pipeline.push({ $match: filters });
 
   if (loginUserRole === Enums.USER.ROLE.ADMIN) {
     pipeline.push({
       $match: {
-        role: { $nin: [Enums.USER.ROLE.ADMIN, Enums.USER.ROLE.SUPER_ADMIN] },
+        role: {
+          $nin: [
+            Enums.USER.ROLE.ADMIN,
+            Enums.USER.ROLE.SUPER_ADMIN,
+          ],
+        },
         _id: { $ne: loginUserId },
       },
     });
   }
 
   // Lookup astrologer details if needed
-  if (includeAstrologerDetails || searchTerm) {
+  if (includeAstrologerDetails || searchTerm || isOnline === true) {
     pipeline.push({
       $lookup: {
         from: "astrologers",
@@ -427,11 +433,11 @@ async function fetchUsersWithDetails(
       },
     });
 
-    // Unwind astrologers to enable searching inside fields like display_name
+    // Unwind astrologers to enable searching inside fields
     pipeline.push({
       $unwind: {
         path: "$astro",
-        preserveNullAndEmptyArrays: true, // Keep users without astrologers
+        preserveNullAndEmptyArrays: true,
       },
     });
   }
@@ -439,32 +445,91 @@ async function fetchUsersWithDetails(
   // Apply search
   if (searchTerm) {
     const s = searchTerm.trim();
+
     pipeline.push({
       $match: {
         $or: [
           { name: { $regex: s, $options: "i" } },
           { email: { $regex: s, $options: "i" } },
           { mobileNumber: { $regex: s, $options: "i" } },
-          { "astro.display_name": { $regex: s, $options: "i" } },
-          { "astro.specializations": { $regex: s, $options: "i" } },
-          { "astro.languages_spoken": { $regex: s, $options: "i" } },
+          {
+            "astro.display_name": {
+              $regex: s,
+              $options: "i",
+            },
+          },
+          {
+            "astro.specializations": {
+              $regex: s,
+              $options: "i",
+            },
+          },
+          {
+            "astro.languages_spoken": {
+              $regex: s,
+              $options: "i",
+            },
+          },
         ],
       },
     });
   }
 
+
+  if (isOnline === true) {
+    pipeline.push({
+      $addFields: {
+        onlineSortOrder: {
+          $cond: [
+            {
+              $and: [
+                {
+                  $eq: [
+                    "$role",
+                    Enums.USER.ROLE.ASTROLOGER,
+                  ],
+                },
+                {
+                  $eq: ["$astro.is_online", true],
+                },
+              ],
+            },
+            0,
+            1,
+          ],
+        },
+      },
+    });
+  }
+
   // Sorting
-  pipeline.push({
-    $sort: { [sortBy]: sortOrder === "asc" ? 1 : -1 },
-  });
+  if (isOnline === true) {
+    pipeline.push({
+      $sort: {
+        onlineSortOrder: 1,
+        [sortBy]: sortOrder === "asc" ? 1 : -1,
+      },
+    });
+  } else {
+    pipeline.push({
+      $sort: {
+        [sortBy]: sortOrder === "asc" ? 1 : -1,
+      },
+    });
+  }
 
   // Save a copy of pipeline before pagination to count total documents
   const countPipeline = [...pipeline];
 
-  // Pagination (skip & limit) only if not exporting CSV
+  // Pagination
   if (!exportCsv) {
-    pipeline.push({ $skip: (page - 1) * limit });
-    pipeline.push({ $limit: limit });
+    pipeline.push({
+      $skip: (page - 1) * limit,
+    });
+
+    pipeline.push({
+      $limit: limit,
+    });
   }
 
   // Exclude sensitive fields
@@ -472,116 +537,90 @@ async function fetchUsersWithDetails(
     $project: {
       password: 0,
       "apiKeys.secret": 0,
+      onlineSortOrder: 0, // ✅ Remove temporary field
     },
   });
 
   // Execute aggregation
   const users = await User.aggregate(pipeline).exec();
 
-  // Count total for paginat
-  // ion (after search & lookup)
+  // Count total for pagination
   let totalCount;
+
   if (exportCsv) {
     totalCount = users.length;
   } else {
-    // Remove skip & limit and $project for counting
-    countPipeline.push({ $count: "total" });
-    const countResult = await User.aggregate(countPipeline).exec();
+    countPipeline.push({
+      $count: "total",
+    });
+
+    const countResult = await User.aggregate(
+      countPipeline,
+    ).exec();
+
     totalCount = countResult[0]?.total || 0;
   }
 
   let enriched = users;
 
   // Add astrologer service rates if requested
-  // Add astrologer service rates + promotion details
   if (includeAstrologerDetails) {
-    const astroList = users.map((u) => u.astro).filter(Boolean);
+    const astroList = users
+      .map((u) => u.astro)
+      .filter(Boolean);
 
     const astroIds = astroList.map((a) => a._id);
 
-    const [serviceRates, promotions] = await Promise.all([
-      AstrologerServiceRates.find({
-        astrologer_id: {
-          $in: astroIds,
-        },
-      }).lean(),
+    const serviceRates = await AstrologerServiceRates.find({
+      astrologer_id: { $in: astroIds },
+    }).lean();
 
-      Promotion.find({
-        astrologers: {
-          $in: astroIds,
-        },
-        isActive: true,
-      }).lean(),
-    ]);
-
-    const rateMap = {};
-
-    serviceRates.forEach((rate) => {
+    const rateMap = serviceRates.reduce((acc, rate) => {
       const key = rate.astrologer_id.toString();
 
-      if (!rateMap[key]) {
-        rateMap[key] = [];
+      acc[key] = acc[key] || [];
+      acc[key].push(rate);
+
+      return acc;
+    }, {});
+
+    enriched = users.map((u) => {
+      const astro = u.astro || null;
+
+      if (astro) {
+        astro.services =
+          rateMap[astro._id.toString()] || [];
       }
 
-      rateMap[key].push(rate);
+      const { astro: _omitAstro, ...rest } = u;
+
+      return {
+        ...rest,
+        astrologerDetails: astro || null,
+      };
     });
-
-    const promotionMap = {};
-
-    promotions.forEach((promotion) => {
-      promotion.astrologers.forEach((astroId) => {
-        promotionMap[astroId.toString()] = {
-          _id: promotion._id,
-          title: promotion.title,
-          services: promotion.services,
-          startDate: promotion.startDate,
-          endDate: promotion.endDate,
-          isActive: promotion.isActive,
-        };
-      });
-    });
-
-    enriched = users
-      .map((u) => {
-        const astro = u.astro || null;
-
-        if (astro) {
-          astro.services = rateMap[astro._id.toString()] || [];
-
-          astro.promotion = promotionMap[astro._id.toString()] || null;
-        }
-
-        const { astro: _omitAstro, ...rest } = u;
-
-        return {
-          ...rest,
-          astrologerDetails: astro || null,
-        };
-      })
-      .filter((user) => {
-        if (!hasServiceRate) {
-          return true;
-        }
-
-        const services = user.astrologerDetails?.services || [];
-
-        return services.length > 0;
-      });
   }
+
   // Add followers/following counts
   enriched = await Promise.all(
     enriched.map(async (u) => {
-      const followersCount = await FollowRequest.countDocuments({
-        astrologer_id: u._id,
-      });
-      const followingCount = await FollowRequest.countDocuments({
-        user_id: u._id,
-      });
+      const followersCount =
+        await FollowRequest.countDocuments({
+          astrologer_id: u._id,
+        });
+
+      const followingCount =
+        await FollowRequest.countDocuments({
+          user_id: u._id,
+        });
+
       let currentMonthEarning = 0;
 
       if (u.role === Enums.USER.ROLE.ASTROLOGER) {
-        currentMonthEarning = await getAstrologerMonthlyEarnings(u._id);
+        currentMonthEarning =
+          await getAstrologerMonthlyEarnings(u._id);
       }
+
       return {
         ...u,
         followersCount,
@@ -601,7 +640,10 @@ async function fetchUsersWithDetails(
         limit,
       });
 
-  return { data: enriched, pagination };
+  return {
+    data: enriched,
+    pagination,
+  };
 }
 
 const blockStateUser = async (userId) => {

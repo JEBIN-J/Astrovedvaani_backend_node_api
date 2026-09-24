@@ -108,17 +108,16 @@ exports.fetchAstrologers = async ({
   gender,
   userId,
   search,
+  targetServiceType,
 }) => {
   try {
     logger.info(
       `fetchAstrologers called with params limit=${limit}, cursor=${cursor}, filters=${JSON.stringify(
         filters,
-      )}, sortPrice=${sortPrice}, sortExperience=${sortExperience}, sortRating=${sortRating}, gender=${gender}, userId=${userId}, search=${search}`,
+      )}, sortPrice=${sortPrice}, sortExperience=${sortExperience}, sortRating=${sortRating}, gender=${gender}, userId=${userId}, search=${search}, targetServiceType=${targetServiceType}`,
     );
 
     // ── Decide whether promotion data should be attached for this caller ──
-    // No userId (no token) => never attach promotion.
-    // userId present => attach only if promotionalSessionUsed is false AND wallet balance <= threshold.
     let showPromotions = false;
 
     if (userId) {
@@ -151,7 +150,7 @@ exports.fetchAstrologers = async ({
       !filters?.["is_free"] &&
       !gender &&
       !search &&
-      !userId; // promotion visibility depends on per-user wallet, so skip cache when userId is present
+      !userId;
 
     logger.info(`isCacheable=${isCacheable}`);
 
@@ -168,19 +167,24 @@ exports.fetchAstrologers = async ({
 
     if (isCacheable) {
       const cachedData = await CacheService.get(cacheKey);
+
       if (cachedData) {
         logger.info(`Returning cached astrologers for key=${cacheKey}`);
+
         return cachedData;
       }
     }
 
     const DEFAULT_SERVICE_TYPE = Enums.SERVICE.TYPE.CHAT;
+
     if (!filters["service_rates.service_type"]) {
       filters["service_rates.service_type"] = DEFAULT_SERVICE_TYPE;
     }
 
     let serviceTypeFilter = filters["service_rates.service_type"];
+
     let isFreeFilter = undefined;
+
     const rankingFilters = {};
     const astrologerMatchFilters = {};
 
@@ -197,26 +201,37 @@ exports.fetchAstrologers = async ({
     });
 
     logger.info(`rankingFilters=${JSON.stringify(rankingFilters)}`);
+
     logger.info(
       `astrologerMatchFilters=${JSON.stringify(astrologerMatchFilters)}`,
     );
 
     const now = new Date();
+
     const aggregationPipeline = [];
 
     if (cursor && !sortPrice && !sortExperience) {
       const cursorDoc = await AstrologerRanking.findById(cursor).select({
         score: 1,
       });
+
       logger.info(`cursorDoc=${JSON.stringify(cursorDoc)}`);
+
       if (cursorDoc) {
         aggregationPipeline.push({
           $match: {
             $or: [
-              { score: { $lt: cursorDoc.score } },
+              {
+                score: {
+                  $lt: cursorDoc.score,
+                },
+              },
               {
                 score: cursorDoc.score,
-                _id: { $gt: new mongoose.Types.ObjectId(cursor) },
+
+                _id: {
+                  $gt: new mongoose.Types.ObjectId(cursor),
+                },
               },
             ],
           },
@@ -225,16 +240,26 @@ exports.fetchAstrologers = async ({
     }
 
     aggregationPipeline.push(
-      { $match: rankingFilters },
+      {
+        $match: rankingFilters,
+      },
+
       {
         $lookup: {
           from: "astrologers",
+
           localField: "astrologer_id",
+
           foreignField: "_id",
+
           as: "astrologer",
         },
       },
-      { $unwind: "$astrologer" },
+
+      {
+        $unwind: "$astrologer",
+      },
+
       ...(Object.keys(astrologerMatchFilters).length
         ? [
             {
@@ -247,74 +272,132 @@ exports.fetchAstrologers = async ({
             },
           ]
         : []),
+
       {
         $lookup: {
           from: "users",
+
           localField: "astrologer.user_id",
+
           foreignField: "_id",
+
           as: "user",
         },
       },
-      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+
+      {
+        $unwind: {
+          path: "$user",
+
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+
       {
         $match: {
           "user.isDeleted": false,
+
           "user.verificationStatus": Enums.USER.VERIFICATION_STATUS.APPROVED,
         },
       },
-      ...(gender ? [{ $match: { "user.gender": parseInt(gender) } }] : []),
+
+      ...(gender
+        ? [
+            {
+              $match: {
+                "user.gender": parseInt(gender),
+              },
+            },
+          ]
+        : []),
+
       {
         $lookup: {
           from: "astrologerservicerates",
+
           localField: "astrologer._id",
+
           foreignField: "astrologer_id",
+
           as: "service_rates",
         },
       },
-      { $match: { service_rates: { $ne: [], $exists: true } } },
+
+      {
+        $match: {
+          service_rates: {
+            $ne: [],
+            $exists: true,
+          },
+        },
+      },
+
       ...(serviceTypeFilter !== null
         ? [
             {
               $match: {
                 service_rates: {
-                  $elemMatch: { service_type: serviceTypeFilter },
+                  $elemMatch: {
+                    service_type: serviceTypeFilter,
+                  },
                 },
               },
             },
           ]
         : []),
+
       {
         $lookup: {
           from: "consultationsessions",
+
           localField: "astrologer.user_id",
+
           foreignField: "astrologer_user_id",
+
           as: "sessions",
         },
       },
+
       ...(isFreeFilter !== undefined
-        ? [{ $match: { "sessions.is_free": isFreeFilter } }]
+        ? [
+            {
+              $match: {
+                "sessions.is_free": isFreeFilter,
+              },
+            },
+          ]
         : []),
 
-      // ── Lookup active offers for this astrologer ──
+      // ── Lookup active offers ──
       {
         $lookup: {
           from: "astrologeroffers",
+
           localField: "astrologer._id",
+
           foreignField: "astrologer_id",
+
           as: "offer_doc",
         },
       },
+
       {
-        $unwind: { path: "$offer_doc", preserveNullAndEmptyArrays: true },
+        $unwind: {
+          path: "$offer_doc",
+
+          preserveNullAndEmptyArrays: true,
+        },
       },
 
-      // ── Merge offer data into each service_rate entry ── (UNCHANGED — exactly as before)
+      // ── Merge offer data into service_rates ──
       {
         $addFields: {
           service_rates: {
             $map: {
               input: "$service_rates",
+
               as: "sr",
+
               in: {
                 $let: {
                   vars: {
@@ -325,7 +408,9 @@ exports.fetchAstrologers = async ({
                             input: {
                               $ifNull: ["$offer_doc.offers", []],
                             },
+
                             as: "offer",
+
                             cond: {
                               $and: [
                                 {
@@ -334,41 +419,67 @@ exports.fetchAstrologers = async ({
                                     "$$sr.service_type",
                                   ],
                                 },
-                                { $eq: ["$$offer.is_active", true] },
+
+                                {
+                                  $eq: ["$$offer.is_active", true],
+                                },
+
                                 {
                                   $or: [
-                                    { $eq: ["$$offer.start_time", null] },
-                                    { $lte: ["$$offer.start_time", now] },
+                                    {
+                                      $eq: ["$$offer.start_time", null],
+                                    },
+
+                                    {
+                                      $lte: ["$$offer.start_time", now],
+                                    },
                                   ],
                                 },
+
                                 {
                                   $or: [
-                                    { $eq: ["$$offer.end_time", null] },
-                                    { $gt: ["$$offer.end_time", now] },
+                                    {
+                                      $eq: ["$$offer.end_time", null],
+                                    },
+
+                                    {
+                                      $gt: ["$$offer.end_time", now],
+                                    },
                                   ],
                                 },
                               ],
                             },
                           },
                         },
+
                         0,
                       ],
                     },
                   },
+
                   in: {
                     $mergeObjects: [
                       "$$sr",
+
                       {
                         is_offer_applied: {
                           $cond: [
-                            { $ifNull: ["$$matched_offer", false] },
+                            {
+                              $ifNull: ["$$matched_offer", false],
+                            },
+
                             true,
+
                             false,
                           ],
                         },
+
                         final_rate: {
                           $cond: [
-                            { $ifNull: ["$$matched_offer", false] },
+                            {
+                              $ifNull: ["$$matched_offer", false],
+                            },
+
                             {
                               $cond: [
                                 {
@@ -377,15 +488,19 @@ exports.fetchAstrologers = async ({
                                     "PERCENTAGE",
                                   ],
                                 },
+
                                 {
                                   $max: [
                                     0,
+
                                     {
                                       $subtract: [
                                         "$$sr.rate",
+
                                         {
                                           $multiply: [
                                             "$$sr.rate",
+
                                             {
                                               $divide: [
                                                 "$$matched_offer.discount_value",
@@ -398,12 +513,15 @@ exports.fetchAstrologers = async ({
                                     },
                                   ],
                                 },
+
                                 {
                                   $max: [
                                     0,
+
                                     {
                                       $subtract: [
                                         "$$sr.rate",
+
                                         "$$matched_offer.discount_value",
                                       ],
                                     },
@@ -411,6 +529,7 @@ exports.fetchAstrologers = async ({
                                 },
                               ],
                             },
+
                             "$$sr.rate",
                           ],
                         },
@@ -424,37 +543,52 @@ exports.fetchAstrologers = async ({
         },
       },
 
-      // ── Lookup PROMOTION data separately — does NOT touch service_rates ──
-      // Only runs at all when showPromotions is true (i.e. userId present AND eligible)
+      // ── Promotion lookup ──
       ...(showPromotions
         ? [
             {
               $lookup: {
                 from: "promotions",
-                let: { astrologerId: "$astrologer._id" },
+
+                let: {
+                  astrologerId: "$astrologer._id",
+                },
+
                 pipeline: [
                   {
                     $match: {
                       $expr: {
                         $and: [
-                          // NOTE: make sure "astrologers" is the actual array field name
-                          // on your Promotion schema, holding ObjectId values that match
-                          // astrologer._id's type. If your field is named differently
-                          // (e.g. astrologer_ids), rename it below.
                           {
                             $in: [
                               "$$astrologerId",
-                              { $ifNull: ["$astrologers", []] },
+
+                              {
+                                $ifNull: ["$astrologers", []],
+                              },
                             ],
                           },
-                          { $eq: ["$isActive", true] },
-                          { $lte: ["$startDate", now] },
-                          { $gte: ["$endDate", now] },
+
+                          {
+                            $eq: ["$isActive", true],
+                          },
+
+                          {
+                            $lte: ["$startDate", now],
+                          },
+
+                          {
+                            $gte: ["$endDate", now],
+                          },
                         ],
                       },
                     },
                   },
-                  { $limit: 1 },
+
+                  {
+                    $limit: 1,
+                  },
+
                   {
                     $project: {
                       _id: 1,
@@ -465,29 +599,43 @@ exports.fetchAstrologers = async ({
                     },
                   },
                 ],
+
                 as: "promotion_doc",
               },
             },
+
             {
               $unwind: {
                 path: "$promotion_doc",
+
                 preserveNullAndEmptyArrays: true,
               },
             },
-            // ── Compute promotion priority flag RIGHT HERE, right after the lookup ──
-            // This guarantees the field exists and is type-safe, regardless of what
-            // happens in later stages (project/addFields ordering issues).
+
             {
               $addFields: {
                 _promotionOrder: {
                   $cond: [
                     {
                       $and: [
-                        { $ne: [{ $type: "$promotion_doc" }, "missing"] },
-                        { $ne: ["$promotion_doc", null] },
+                        {
+                          $ne: [
+                            {
+                              $type: "$promotion_doc",
+                            },
+
+                            "missing",
+                          ],
+                        },
+
+                        {
+                          $ne: ["$promotion_doc", null],
+                        },
                       ],
                     },
+
                     0,
+
                     1,
                   ],
                 },
@@ -495,50 +643,116 @@ exports.fetchAstrologers = async ({
             },
           ]
         : [
-            // When promotions aren't shown at all for this request, everyone gets
-            // the same order value so sorting behaves exactly as before.
-            { $addFields: { _promotionOrder: 1 } },
+            {
+              $addFields: {
+                _promotionOrder: 1,
+              },
+            },
           ]),
     );
 
+    // ── Search ──
     if (search) {
       const searchConditions = [
-        { "astrologer.display_name": { $regex: search, $options: "i" } },
-        { "user.name": { $regex: search, $options: "i" } },
-        { "astrologer.bio": { $regex: search, $options: "i" } },
-        { "astrologer.specializations": { $regex: search, $options: "i" } },
+        {
+          "astrologer.display_name": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+
+        {
+          "user.name": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+
+        {
+          "astrologer.bio": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+
+        {
+          "astrologer.specializations": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+
         {
           "astrologer.languages_spoken": {
-            $elemMatch: { $regex: search, $options: "i" },
+            $elemMatch: {
+              $regex: search,
+              $options: "i",
+            },
           },
         },
       ];
-      aggregationPipeline.push({ $match: { $or: searchConditions } });
+
+      aggregationPipeline.push({
+        $match: {
+          $or: searchConditions,
+        },
+      });
+
       logger.info(`Search conditions=${JSON.stringify(searchConditions)}`);
     }
 
+    // ── Project ──
     aggregationPipeline.push({
       $project: {
         _id: 1,
+
         ratings_avg: 1,
+
         astrologer: {
           $mergeObjects: [
             "$astrologer",
+
             {
               display_name: {
                 $ifNull: ["$astrologer.display_name", "$user.name"],
               },
-              profilePicture: { $ifNull: ["$user.profilePicture", null] },
+
+              profilePicture: {
+                $ifNull: ["$user.profilePicture", null],
+              },
             },
           ],
         },
+
         user: 1,
+
         service_rates: 1,
+
         score: 1,
+
         promotion_doc: 1,
-        _promotionOrder: 1, // ← now explicitly carried forward through $project
+
+        _promotionOrder: 1,
       },
     });
+
+    // ─────────────────────────────────────────────
+    // SERVICE + ONLINE PRIORITY
+    //
+    // serviceType = CHAT:
+    //   online + isChat=true  -> priority 0
+    //
+    // serviceType = CALL:
+    //   online + isCall=true  -> priority 0
+    //
+    // serviceType = VIDEO:
+    //   online + isVideo=true -> priority 0
+    //
+    // Then:
+    //   online + not busy     -> priority 1
+    //   online + busy         -> priority 2
+    //   offline               -> priority 3
+    // ─────────────────────────────────────────────
 
     aggregationPipeline.push({
       $addFields: {
@@ -548,30 +762,108 @@ exports.fetchAstrologers = async ({
               {
                 case: {
                   $and: [
-                    { $eq: ["$astrologer.is_online", true] },
-                    { $ne: ["$astrologer.is_busy", true] },
+                    {
+                      $eq: ["$astrologer.is_online", true],
+                    },
+
+                    {
+                      $or: [
+                        // CHAT
+                        {
+                          $and: [
+                            {
+                              $eq: [serviceTypeFilter, Enums.SERVICE.TYPE.CHAT],
+                            },
+
+                            {
+                              $eq: ["$astrologer.isChat", true],
+                            },
+                          ],
+                        },
+
+                        // CALL
+                        {
+                          $and: [
+                            {
+                              $eq: [serviceTypeFilter, Enums.SERVICE.TYPE.CALL],
+                            },
+
+                            {
+                              $eq: ["$astrologer.isCall", true],
+                            },
+                          ],
+                        },
+
+                        // VIDEO
+                        {
+                          $and: [
+                            {
+                              $eq: [
+                                serviceTypeFilter,
+                                Enums.SERVICE.TYPE.VIDEO,
+                              ],
+                            },
+
+                            {
+                              $eq: ["$astrologer.isVideo", true],
+                            },
+                          ],
+                        },
+                      ],
+                    },
                   ],
                 },
+
                 then: 0,
               },
+
+              // Online but selected service
+              // is not enabled
               {
                 case: {
                   $and: [
-                    { $eq: ["$astrologer.is_online", true] },
-                    { $eq: ["$astrologer.is_busy", true] },
+                    {
+                      $eq: ["$astrologer.is_online", true],
+                    },
+
+                    {
+                      $ne: ["$astrologer.is_busy", true],
+                    },
                   ],
                 },
+
                 then: 1,
               },
+
+              // Online + busy
+              {
+                case: {
+                  $and: [
+                    {
+                      $eq: ["$astrologer.is_online", true],
+                    },
+
+                    {
+                      $eq: ["$astrologer.is_busy", true],
+                    },
+                  ],
+                },
+
+                then: 2,
+              },
             ],
-            default: 2,
+
+            // Offline
+            default: 3,
           },
         },
       },
     });
 
+    // ── Sorting ──
     if (sortPrice) {
       const sortOrder = sortPrice === "asc" ? 1 : -1;
+
       aggregationPipeline.push({
         $addFields: {
           target_rate: {
@@ -579,19 +871,27 @@ exports.fetchAstrologers = async ({
               {
                 $filter: {
                   input: "$service_rates",
+
                   as: "rate",
-                  cond: { $eq: ["$$rate.service_type", serviceTypeFilter] },
+
+                  cond: {
+                    $eq: ["$$rate.service_type", serviceTypeFilter],
+                  },
                 },
               },
+
               0,
             ],
           },
         },
       });
+
       aggregationPipeline.push({
         $sort: {
           _promotionOrder: 1,
+
           _onlineOrder: 1,
+
           "target_rate.final_rate": sortOrder,
         },
       });
@@ -599,7 +899,9 @@ exports.fetchAstrologers = async ({
       aggregationPipeline.push({
         $sort: {
           _promotionOrder: 1,
+
           _onlineOrder: 1,
+
           "astrologer.experience_years": sortExperience === "asc" ? 1 : -1,
         },
       });
@@ -607,17 +909,29 @@ exports.fetchAstrologers = async ({
       aggregationPipeline.push({
         $sort: {
           _promotionOrder: 1,
+
           _onlineOrder: 1,
+
           ratings_avg: sortRating === "asc" ? 1 : -1,
         },
       });
     } else {
       aggregationPipeline.push({
-        $sort: { _promotionOrder: 1, _onlineOrder: 1, score: -1, _id: 1 },
+        $sort: {
+          _promotionOrder: 1,
+
+          _onlineOrder: 1,
+
+          score: -1,
+
+          _id: 1,
+        },
       });
     }
 
-    aggregationPipeline.push({ $limit: limit + 1 });
+    aggregationPipeline.push({
+      $limit: limit + 1,
+    });
 
     logger.info(
       `Final aggregation pipeline: ${JSON.stringify(aggregationPipeline)}`,
@@ -626,57 +940,86 @@ exports.fetchAstrologers = async ({
     const result = await AstrologerRanking.aggregate(aggregationPipeline);
 
     const hasMore = result.length > limit;
+
     const data = hasMore ? result.slice(0, -1) : result;
 
     const formattedData = data.map((r) => ({
       _id: r._id,
+
       ratings_avg: r.ratings_avg || 0,
+
       astrologer: {
         ...r.astrologer,
+
         display_name: r.astrologer.display_name || r.user?.name || "Astrologer",
+
         profilePicture:
           r.astrologer.profilePicture || r.user?.profilePicture || null,
+
         bio: r.astrologer.bio || "",
+
         languages_spoken: r.astrologer.languages_spoken || [],
+
         specializations: r.astrologer.specializations || [],
+
         experience_years: r.astrologer.experience_years || 0,
+
         is_online: r.astrologer.is_online || false,
+
         is_premium: r.astrologer.is_premium || false,
+
         is_busy: r.astrologer.is_busy || false,
+
         services: {
           chat: r.astrologer.isChat || false,
+
           call: r.astrologer.isCall || false,
+
           video: r.astrologer.isVideo || false,
         },
       },
+
       user: r.user || null,
+
       service_rates: (r.service_rates || []).map((sr) => ({
         ...sr,
+
         is_offer_applied: sr.is_offer_applied ?? false,
+
         final_rate: sr.final_rate ?? sr.rate,
       })),
-      // null when: no userId/token, expired, inactive, not-yet-started,
-      // promotionalSessionUsed=true, wallet balance > threshold, or nothing configured
+
       promotion: r.promotion_doc
         ? {
             _id: r.promotion_doc._id,
+
             title: r.promotion_doc.title,
+
             startDate: r.promotion_doc.startDate,
+
             endDate: r.promotion_doc.endDate,
+
             services: r.promotion_doc.services || [],
           }
         : null,
     }));
 
+    // ── Follow status ──
     if (userId) {
       const astroIds = formattedData.map((r) => r.astrologer._id);
+
       const follows = await FollowRequest.find({
         user_id: userId,
-        astrologer_id: { $in: astroIds },
+
+        astrologer_id: {
+          $in: astroIds,
+        },
       }).select("astrologer_id");
+
       const followedSet = new Set(
         follows.map((f) => f.astrologer_id.toString()),
       );
+
       formattedData.forEach((item) => {
         item.isFollow = followedSet.has(item.astrologer._id.toString());
       });
@@ -690,9 +1033,14 @@ exports.fetchAstrologers = async ({
       formattedData.length > 0
         ? formattedData[formattedData.length - 1]._id
         : null;
+
     const response = {
       data: formattedData,
-      pagination: { hasMore, nextCursor },
+
+      pagination: {
+        hasMore,
+        nextCursor,
+      },
     };
 
     if (isCacheable) {
@@ -702,7 +1050,14 @@ exports.fetchAstrologers = async ({
     return response;
   } catch (err) {
     logger.error(`Error fetching ranked astrologers: ${err.message}`);
-    return { data: [], pagination: { hasMore: false, nextCursor: null } };
+
+    return {
+      data: [],
+      pagination: {
+        hasMore: false,
+        nextCursor: null,
+      },
+    };
   }
 };
 exports.fetchAstrologerById = async (id, userId) => {
