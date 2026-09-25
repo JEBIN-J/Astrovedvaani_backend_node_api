@@ -129,10 +129,6 @@ const consultationSessionSchema = new Schema(
       min: 0,
     },
 
-    is_promotional: {
-      type: Boolean,
-      default: false,
-    },
 
     promotion_id: {
       type: Schema.Types.ObjectId,
