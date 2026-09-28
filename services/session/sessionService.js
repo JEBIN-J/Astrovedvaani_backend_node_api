@@ -40,6 +40,7 @@ function isUserEligibleForPromotion(user) {
   if (!user) return false;
 
   if (user.promotionalSessionUsed) return false;
+
   return true;
 }
 
@@ -142,6 +143,39 @@ async function createChatSession({
 
       freeDuration = freeEligibility.duration;
       free = true;
+    }
+
+    if (freeEligibility.eligible) {
+      const [pricing] = await applyOffersOnRates(astrologer._id, [serviceRate]);
+
+      if (!pricing) {
+        throw new Error("Failed to resolve pricing");
+      }
+
+      const freeRate = Number(pricing.final_rate);
+
+      if (!freeRate || freeRate <= 0) {
+        throw new Error("Invalid rate for free session");
+      }
+
+      logger.info(
+        `[FreeSession] Creating ONLY free session for ${freeDuration} minutes. Promo will be checked after free duration.`,
+      );
+
+      return await createPaidSession({
+        userId,
+        astrologer,
+        astrologerUserId,
+        rate: freeRate,
+        minutes: freeDuration,
+        mode,
+        commission_pct: serviceRate.commission_pct,
+        free: true,
+        freeDuration,
+        isPromotional: false,
+        promotionId: null,
+        promotionalDuration: 0,
+      });
     }
 
     let rate;
@@ -337,6 +371,225 @@ async function createChatSession({
   }
 }
 
+async function activatePostFreePhase({ sessionId }) {
+  const { saveSession } = require("../../utils/redis/sessionCacheService");
+
+  const session = await ConsultationSession.findById(sessionId);
+
+  if (!session) {
+    throw new Error("Session not found");
+  }
+
+  if (!session.is_free || !session.freeDuration) {
+    return {
+      success: true,
+      skipped: true,
+      session,
+      paidDuration: session.duration_minutes,
+      isPromotional: session.is_promotional,
+      promotionalDuration: session.promotionalDuration || 0,
+    };
+  }
+
+  const userId = session.user_id;
+  const astrologerUserId = session.astrologer_user_id;
+  const mode = session.mode;
+
+  const user = await User.findById(userId).lean();
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  const astrologerDetails = await getAstrologerDetails(astrologerUserId, {
+    service_type: mode,
+  });
+
+  if (!astrologerDetails) {
+    throw new Error("Astrologer not found or service not available");
+  }
+
+  const { astrologer, serviceRate } = astrologerDetails;
+
+  if (!astrologer || !serviceRate?.rate) {
+    throw new Error("Astrologer service rate not configured");
+  }
+
+  const latestRecharge = await WalletLedger.findOne({
+    user: userId,
+    type: "RECHARGE",
+    status: "SUCCESS",
+  }).sort({ createdAt: -1 });
+
+  const rechargeAmount = Number(latestRecharge?.amount || 0);
+
+  logger.info(
+    `[PostFree] userId=${userId} latestSuccessfulRecharge=${rechargeAmount}`,
+  );
+
+  const promoEligible = isUserEligibleForPromotion(user);
+
+  let activePromo = null;
+
+  if (promoEligible && rechargeAmount <= 50) {
+    activePromo = await getActivePromotion(astrologer._id, mode);
+  } else if (rechargeAmount > 50) {
+    logger.info(
+      `[PostFree] Promo skipped for userId=${userId} because latest recharge ₹${rechargeAmount} > ₹50`,
+    );
+  }
+
+  let rate;
+  let commission_pct = serviceRate.commission_pct;
+  let isPromotional = false;
+  let promotionId = null;
+  let promotionalDuration = 0;
+  let paidDuration = 0;
+
+  if (activePromo) {
+    const promoRate = Number(activePromo.promoService.promotional_rate);
+
+    promotionalDuration = Number(
+      activePromo.promoService.promotional_minutes || 0,
+    );
+
+    if (promotionalDuration > 0) {
+      const promoWalletEligibility =
+        await userService.getWalletSessionEligibility(
+          userId,
+          promoRate,
+        );
+
+      logger.info(
+        `[PostFree] userId=${userId} promoRate=${promoRate} configuredPromotionalMinutes=${promotionalDuration} promoWalletFundedMinutes=${promoWalletEligibility?.maxDuration ?? 0}`,
+      );
+
+      if (promoWalletEligibility?.eligible) {
+        const claimed = await claimPromotionalEligibility(userId);
+
+        if (claimed) {
+          isPromotional = true;
+          rate = promoRate;
+          commission_pct = Number(
+            activePromo.promoService.commission_pct,
+          );
+          promotionId = activePromo.promotion._id;
+          paidDuration = promotionalDuration;
+
+          logger.info("[PostFree] Promotional phase started", {
+            userId,
+            astrologerId: astrologer._id,
+            promotionId,
+            rate,
+            promotionalDuration,
+          });
+        } else {
+          promotionalDuration = 0;
+
+          logger.info(
+            `[PostFree] userId=${userId} promotional eligibility already used`,
+          );
+        }
+      } else {
+        logger.info(
+          `[PostFree] Promo wallet eligibility failed. Falling back to normal pricing.`,
+        );
+
+        promotionalDuration = 0;
+      }
+    }
+  }
+
+  if (!isPromotional) {
+    const [pricing] = await applyOffersOnRates(astrologer._id, [serviceRate]);
+
+    if (!pricing) {
+      throw new Error("Failed to resolve pricing");
+    }
+
+    rate = Number(pricing.final_rate);
+
+    if (!rate || rate <= 0) {
+      throw new Error("Invalid final rate after applying offer");
+    }
+
+    logger.info(`[PostFree] Normal pricing resolved`, {
+      astrologer_id: astrologer._id,
+      service_type: serviceRate.service_type,
+      base_rate: serviceRate.rate,
+      final_rate: rate,
+      discount_applied: pricing.discount_applied,
+    });
+
+    const walletEligibility =
+      await userService.getWalletSessionEligibility(
+        userId,
+        rate,
+      );
+
+    if (!walletEligibility?.eligible) {
+      throw new Error(
+        walletEligibility?.reason ||
+        "Not eligible for paid session after free duration",
+      );
+    }
+
+    paidDuration = walletEligibility.maxDuration;
+
+    commission_pct = serviceRate.commission_pct;
+
+    logger.info(
+      `[PostFree] Normal paid phase started. duration=${paidDuration} minutes`,
+    );
+  }
+
+  if (!paidDuration || paidDuration <= 0) {
+    throw new Error("Invalid paid duration calculated");
+  }
+
+  const totalDuration =
+    Number(session.freeDuration || 0) + Number(paidDuration);
+
+  const now = new Date();
+
+  session.duration_minutes = totalDuration;
+  session.end_time = new Date(
+    now.getTime() + paidDuration * 60000,
+  );
+  session.rate_per_minute = rate;
+  session.commission_pct = commission_pct;
+  session.is_promotional = isPromotional;
+  session.promotion_id = promotionId;
+  session.promotionalDuration = isPromotional
+    ? promotionalDuration
+    : 0;
+
+  await session.save();
+
+  const timestamp = Date.now();
+
+  await saveSession(session._id, {
+    ...session.toObject(),
+    timestamp,
+    astrologer_display_name:
+      astrologer.display_name || "Astrologer",
+  });
+
+  logger.info(
+    `[PostFree] Session updated. sessionId=${sessionId}, freeDuration=${session.freeDuration}, paidDuration=${paidDuration}, totalDuration=${totalDuration}, isPromotional=${isPromotional}`,
+  );
+
+  return {
+    success: true,
+    session,
+    paidDuration,
+    isPromotional,
+    promotionalDuration: isPromotional
+      ? promotionalDuration
+      : 0,
+  };
+}
+
 async function createPaidSession({
   userId,
   astrologer,
@@ -474,6 +727,7 @@ async function isPromotionStillValid(promotionId) {
 
 module.exports = {
   createChatSession,
+  activatePostFreePhase,
   handleAstroShareProcessing,
   claimPromotionalEligibility,
   releasePromotionalEligibility,
