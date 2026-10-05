@@ -46,7 +46,7 @@ exports.createUser = async (req, res) => {
     if (email === undefined || email === null) {
       throw new BadRequestError("Email is required");
     }
-    console.log(" create user--.");
+   
     const result = await createUserByAdmin({
       name,
       email,
@@ -163,7 +163,8 @@ exports.fetchUsers = asyncHandler(async (req, res) => {
     userId,
     astrologerId,
     isDeleted,
-    hasServiceRate,
+
+    is_online,
   } = req.query;
 
   const loginUserId = req.user._id;
@@ -187,12 +188,15 @@ exports.fetchUsers = asyncHandler(async (req, res) => {
   const options = {
     page: parseInt(page),
     limit: parseInt(limit),
-    includeAstrologerDetails: includeAstrologerDetails === "true",
+    includeAstrologerDetails:
+      includeAstrologerDetails === "true",
     sortBy,
     sortOrder,
     exportCsv: exportCsv === "true",
     searchTerm: search,
-    hasServiceRate: req.query.hasServiceRate === "true",
+
+    // ✅ ADDED
+    isOnline: is_online === "true",
   };
 
   let result = await fetchUsersWithDetails(
@@ -203,32 +207,45 @@ exports.fetchUsers = asyncHandler(async (req, res) => {
   );
 
   if (options.includeAstrologerDetails) {
-    let cachedSpecializations = await CacheService.get(
-      CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations",
-    );
+    let cachedSpecializations =
+      await CacheService.get(
+        CacheService.CACHE_PREFIXES.USERS_LIST +
+          ":specializations",
+      );
+
     if (!cachedSpecializations) {
       cachedSpecializations = await getAllSpecializations({
         page: 1,
         limit: 1000,
       });
+
       await CacheService.set(
-        CacheService.CACHE_PREFIXES.USERS_LIST + ":specializations",
+        CacheService.CACHE_PREFIXES.USERS_LIST +
+          ":specializations",
         cachedSpecializations,
       );
     }
 
-    let cachedLanguages = await CacheService.get(
-      CacheService.CACHE_PREFIXES.USERS_LIST + ":languages",
-    );
+    let cachedLanguages =
+      await CacheService.get(
+        CacheService.CACHE_PREFIXES.USERS_LIST +
+          ":languages",
+      );
+
     if (!cachedLanguages) {
-      cachedLanguages = await getAllLanguages({ page: 1, limit: 1000 });
+      cachedLanguages = await getAllLanguages({
+        page: 1,
+        limit: 1000,
+      });
+
       await CacheService.set(
-        CacheService.CACHE_PREFIXES.USERS_LIST + ":languages",
+        CacheService.CACHE_PREFIXES.USERS_LIST +
+          ":languages",
         cachedLanguages,
       );
     }
 
-    // 🔥 ONLY CHANGE IS HERE
+    // ONLY CHANGE
     result.data = result.data.map((user) => {
       if (user.astrologerDetails) {
         const specializationsPop = (
@@ -237,21 +254,28 @@ exports.fetchUsers = asyncHandler(async (req, res) => {
           .map(
             (id) =>
               cachedSpecializations.data.find(
-                (s) => s._id.toString() === id.toString(),
+                (s) =>
+                  s._id.toString() === id.toString(),
               )?.name,
           )
           .filter(Boolean);
 
-        const languagesPop = (user.astrologerDetails.languages_spoken || [])
+        const languagesPop = (
+          user.astrologerDetails.languages_spoken || []
+        )
           .map(
             (id) =>
               cachedLanguages.data.find(
-                (l) => l._id.toString() === id.toString(),
+                (l) =>
+                  l._id.toString() === id.toString(),
               )?.name,
           )
           .filter(Boolean);
 
-        const { verificationStatus, ...restUser } = user;
+        const {
+          verificationStatus,
+          ...restUser
+        } = user;
 
         return {
           ...restUser,
@@ -264,18 +288,27 @@ exports.fetchUsers = asyncHandler(async (req, res) => {
           },
         };
       }
+
       return user;
     });
   }
 
   if (options.exportCsv) {
     const { Parser } = require("json2csv");
+
     const fields = Object.keys(result.data[0] || {});
-    const parser = new Parser({ fields });
+
+    const parser = new Parser({
+      fields,
+    });
+
     const csv = parser.parse(result.data);
 
     res.header("Content-Type", "text/csv");
-    return res.attachment("users_export.csv").send(csv);
+
+    return res
+      .attachment("users_export.csv")
+      .send(csv);
   }
 
   return res.json({

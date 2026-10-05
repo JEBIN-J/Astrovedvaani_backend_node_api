@@ -10,9 +10,14 @@ const { BadRequestError } = require("../../errors");
 exports.getConsultationSessions = async (req, res, next) => {
   try {
     const filters = req.query;
-    console.log("Received filters:", JSON.stringify(filters));
+
     const result = await sessionService.getConsultationSessions(filters);
-    const { attempted_sessions_count, non_attempted_sessions_count, total_sessions_count, revenue } = result;
+    const {
+      attempted_sessions_count,
+      non_attempted_sessions_count,
+      total_sessions_count,
+      revenue,
+    } = result;
     const stats = {
       attempted_sessions_count,
       non_attempted_sessions_count,

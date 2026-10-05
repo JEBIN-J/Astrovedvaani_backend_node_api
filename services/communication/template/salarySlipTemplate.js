@@ -20,7 +20,7 @@ exports.generateSalarySlipPdf = async ({ userId, month, year }) => {
     month,
     year,
   });
-
+  console.log("Existing slip:", existingSlip ? existingSlip._id : "NOT FOUND");
   if (existingSlip) {
     return {
       success: true,
