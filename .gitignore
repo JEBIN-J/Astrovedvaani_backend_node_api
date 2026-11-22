@@ -9,3 +9,5 @@ logs
 # /controller/kundliSection/
 # /services/kundli/
 # /routes/ksRoutes.js
+
+utils/google-services.json
