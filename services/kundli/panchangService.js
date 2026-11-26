@@ -91,32 +91,14 @@ const getPanchangData = async ({ userId, date, location, tz, lang = "en" }) => {
   const cachedData = await CacheService.get(cacheKey);
 
   const fetchAndCache = async () => {
-    const apiUrl = API.PANCHANG({
-      date: formattedDate,
-      location,
-      tz,
-      lang,
-    });
-    console.log("Panchang API URL:", apiUrl);
-
-    const apiUrlChogadiya = API.CHOGHADIYA({
-      date: formattedDate,
-      location,
-      lang,
-    });
-
-    logger.info(`Fetching Panchang API: ${apiUrl}`);
-    logger.info(`Fetching Chogadiya API: ${apiUrlChogadiya}`);
+    // Both are calculated by the local astro engine (one shared calculation).
+    logger.info(
+      `Calculating Panchang + Chogadiya: date=${formattedDate}, location=${location}`,
+    );
 
     const [panchangResponse, chogadiyaResponse] = await Promise.all([
-      axios.get(apiUrl, {
-        headers: getSaasHeaders(),
-        timeout: 15000,
-      }),
-      axios.get(apiUrlChogadiya, {
-        headers: getSaasHeaders(),
-        timeout: 15000,
-      }),
+      API.PANCHANG({ date: formattedDate, location, tz, lang }),
+      API.CHOGHADIYA({ date: formattedDate, location, lang }),
     ]);
 
     const responseData = {

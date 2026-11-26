@@ -144,7 +144,10 @@ const getProfile = async (userId, isRelative, role=Enums.USER.ROLE.USER) => {
   });
 };
 
+// apiUrl is either a third-party URL string or a pending local astro-engine
+// result (API entries backed by the local API return a Promise of { data }).
 const callApi = async (apiUrl) => {
+  if (typeof apiUrl !== "string") return apiUrl;
   const response = await axios.get(apiUrl, {
     headers: getSaasHeaders(),
     // timeout: 15000,
@@ -439,9 +442,13 @@ const getAscendantReport = async (
 ) => {
   try {
     const profile = await getProfile(userId, isRelative);
-    if (!profile) throw new Error("Astrology profile not found");
+    // Like complete-kundli: without a saved profile, use the birth details sent in the request.
+    const hasBirthDetails =
+      (queryParams.dob || queryParams.day) &&
+      (queryParams.birthPlace || queryParams.location);
+    if (!profile && !hasBirthDetails) throw new Error("Astrology profile not found");
 
-    const params = normalizeParams(queryParams, profile);
+    const params = normalizeParams(queryParams, profile || {});
     // ================= CACHE KEY (AFTER DATA READY) =================
 
     const cacheKey = CacheService.generateKey(
@@ -462,14 +469,10 @@ const getAscendantReport = async (
 
     console.log("Params for Ascendant Report:", params);
 
-    const apiUrl = API.ASCENDANT_REPORT({
+    const response = await API.ASCENDANT_REPORT({
       ...params,
       name: queryParams.name || profile?.name || "User",
     });
-
-    logger.info(`[Ascendant API] ${apiUrl}`);
-
-    const response = await callApi(apiUrl);
 
     // ================= UPDATE SELF =================
 
@@ -615,21 +618,12 @@ const getFullNumerology = async (userId, isQuery, queryParams = {}) => {
       logger.info(`Returning Full Numerology from cache`);
       return cachedData;
     }
-    const apiUrl = API.FULL_NUMEROLOGY({
+    const response = await API.FULL_NUMEROLOGY({
       name,
       dob,
       tob: tob || "00:00",
       tz,
       birthplace,
-    });
-
-    logger.info(`[NUMEROLOGY] API URL => ${apiUrl}`);
-
-    const response = await axios.get(apiUrl, {
-      headers: {
-        "x-api-key": process.env.SAAS_API_KEY,
-        "Content-Type": "application/json",
-      },
     });
 
     await CacheService.set(
@@ -670,9 +664,8 @@ const getChoghadiya = async (userId, location, date, isQuery) => {
     logger.info(`Returning Choghadiya from cache for userId=${userId}`);
     return cachedData;
   }
-  const apiUrl = API.CHOGHADIYA({ location, date });
-  logger.info(`Fetching Choghadiya from API: ${apiUrl}`);
-  const response = await axios.get(apiUrl);
+  logger.info(`Calculating Choghadiya: location=${location}, date=${date}`);
+  const response = await API.CHOGHADIYA({ location, date });
   await CacheService.set(cacheKey, response.data, 24 * 60 * 60);
   logger.info(`Cached Choghadiya for userId=${userId}`);
   return response.data;
@@ -727,10 +720,7 @@ const getFullKundliData = async (
   // ===============================
   let fullKundliData;
   try {
-    const apiUrl = API.FULL_KUNDLI(apiParams);
-    logger.info(`FullKundli API URL: ${apiUrl}`);
-
-    const response = await callApi(apiUrl);
+    const response = await API.FULL_KUNDLI(apiParams);
 
     fullKundliData = response.data;
   } catch (err) {

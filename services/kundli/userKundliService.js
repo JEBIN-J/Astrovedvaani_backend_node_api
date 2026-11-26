@@ -125,10 +125,7 @@ const getMatchMakingData = async (id1, id2) => {
     logger.info(
       `Calling MatchMaking API with params: ${JSON.stringify(params)}`,
     );
-    const response = await axios.get(API.MATCH_MAKING(params), {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
+    const response = await API.MATCH_MAKING(params);
 
     // logger.info(`MatchMaking API response received, status: ${response.status}`);
     if (response?.data?.data) {

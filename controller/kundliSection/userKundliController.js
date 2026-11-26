@@ -50,15 +50,7 @@ const getMatchMaking = asyncHandler(async (req, res) => {
       directParams.girl_name = "Girl";
     }
 
-    const finalUrl = API.MATCH_MAKING(directParams);
-
-    const response = await axios.get(finalUrl, {
-      headers: {
-        "x-api-key": process.env.SAAS_API_KEY,
-        "Content-Type": "application/json",
-      },
-      timeout: 15000,
-    });
+    const response = await API.MATCH_MAKING(directParams);
 
     matchData = response.data;
   } else {

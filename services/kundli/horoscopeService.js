@@ -108,13 +108,20 @@ const getHoroscopeData = async ({
         throw new Error(`Unsupported horoscope type: ${type}`);
     }
 
-    logger.info(`[Horoscope] Prepared API URL: ${apiUrl}`);
+    logger.info(
+      `[Horoscope] Calculating ${type} horoscope for ${zodiacSign} (${formattedDate})`,
+    );
     let response;
     try {
-      response = await axios.get(apiUrl, {
-        headers: getSaasHeaders(),
-        timeout: 15000,
-      });
+      // Daily/weekly/monthly/yearly entries return the local astro engine's
+      // pending result; anything still a URL is a third-party request.
+      response =
+        typeof apiUrl === "string"
+          ? await axios.get(apiUrl, {
+              headers: getSaasHeaders(),
+              timeout: 15000,
+            })
+          : await apiUrl;
     } catch (err) {
       logger.error(
         `[Horoscope] API request failed`,

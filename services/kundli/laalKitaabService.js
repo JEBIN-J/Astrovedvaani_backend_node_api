@@ -90,17 +90,12 @@ const getLaalKitaabData = async ({
     const dob = `${day}-${month}-${year}`; // DD-MM-YYYY
     const tob = `${hour}:${min}`; // HH:mm
 
-    const apiUrl = API.LAAL_KITAAB({
+    const response = await API.LAAL_KITAAB({
       name: profile?.name || "User",
       dob,
       tob,
       birthPlace: location,
       tz: tzone,
-    });
-
-    const response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
     });
     await CacheService.set(cacheKey, response.data, 2 * 60 * 60); // 2h cache
     return response.data;

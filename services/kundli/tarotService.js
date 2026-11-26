@@ -97,20 +97,11 @@ const revealTarotCard = async ({
   }
 };
 
-const oneCard = async () => {
+const oneCard = async (baseUrl) => {
   try {
-    const url = API.TAROT_ONE_CARD();
     logger.info("[TAROT] Calling One Card Tarot API");
-    logger.info(`[TAROT] URL: ${url}`);
 
-    const response = await axios.post(
-      url,
-      {},
-      {
-        headers: getSaasHeaders(),
-        timeout: 15000,
-      },
-    );
+    const response = await API.TAROT_ONE_CARD(baseUrl);
 
     logger.info("[TAROT] One Card Tarot API success");
 
@@ -128,21 +119,11 @@ const oneCard = async () => {
 };
 
 // 🔮 THREE CARD TAROT (EXTERNAL API)
-const threeCard = async () => {
+const threeCard = async (baseUrl) => {
   try {
-    const url = API.TAROT_THREE_CARD(); // no params
-
     logger.info("[TAROT] Calling Three Card Tarot API");
-    logger.info(`[TAROT] URL: ${url}`);
 
-    const response = await axios.post(
-      url,
-      {},
-      {
-        headers: getSaasHeaders(),
-        timeout: 15000,
-      },
-    );
+    const response = await API.TAROT_THREE_CARD(baseUrl);
 
     logger.info("[TAROT] Three Card Tarot API success");
 

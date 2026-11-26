@@ -3,6 +3,20 @@ const { BadRequestError } = require("../../errors");
 const tarotService = require("../../services/kundli/tarotService");
 const logger = require("../../utils/logger");
 
+// Backend origin as the browser sees it, used to build tarot image links.
+// Behind a tunnel or proxy (e.g. VS Code port forwarding / dev tunnels) the
+// Host header is rewritten to localhost:<port>; the public address the browser
+// used is in X-Forwarded-Host, with its scheme in X-Forwarded-Proto.
+const requestBaseUrl = (req) => {
+  const forwardedHost = (req.get("x-forwarded-host") || "").split(",")[0].trim();
+  if (forwardedHost) {
+    const proto = (req.get("x-forwarded-proto") || "https").split(",")[0].trim();
+    return `${proto}://${forwardedHost}`;
+  }
+  const originScheme = /^(https?):/i.exec(req.get("origin") || "")?.[1];
+  return `${originScheme || req.protocol}://${req.get("host")}`;
+};
+
 const createTarotSession = asyncHandler(async (req, res) => {
   const userId = req.user?._id || null;
 
@@ -35,7 +49,7 @@ const revealTarotCard = asyncHandler(async (req, res) => {
 // 🃏 One Card
 const oneCardTarot = async (req, res) => {
   try {
-    const data = await tarotService.oneCard();
+    const data = await tarotService.oneCard(requestBaseUrl(req));
 
     return res.status(200).json({
       success: true,
@@ -56,7 +70,7 @@ const threeCardTarot = async (req, res) => {
   try {
     logger.info("[API] Three Card Tarot request");
 
-    const data = await tarotService.threeCard();
+    const data = await tarotService.threeCard(requestBaseUrl(req));
 
     return res.status(200).json({
       success: true,
