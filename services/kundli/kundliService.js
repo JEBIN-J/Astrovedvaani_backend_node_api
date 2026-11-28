@@ -511,9 +511,9 @@ const getMonthlyChoghadiya = async (userId, location, month, isQuery) => {
     logger.info(`Returning Monthly Choghadiya from cache for userId=${userId}`);
     return cachedData;
   }
-  const apiUrl = API.MONTHLY_CHOGHADIYA({ location, month });
-  logger.info(`Fetching Monthly Choghadiya from API: ${apiUrl}`);
-  const response = await axios.get(apiUrl);
+  logger.info(`Calculating Monthly Choghadiya: location=${location}, month=${month}`);
+  // Calculated by the local astro engine (panchang for each day of the month).
+  const response = await API.MONTHLY_CHOGHADIYA({ location, month });
   await CacheService.set(cacheKey, response.data, 24 * 60 * 60);
   logger.info(`Cached Monthly Choghadiya for userId=${userId}`);
   return response.data;

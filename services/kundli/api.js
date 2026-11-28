@@ -1,7 +1,5 @@
 import axios from "axios";
 
-const BASE_URL = "https://api.nextastroapi.com/api/";
-
 // Local Astroveduvani_api (Python). Replaces NextAstroAPI for matchmaking,
 // Lal Kitab and tarot. Start it with PORT=5001 and GEOCODING_PROVIDER=nominatim.
 const LOCAL_BASE_URL = (
@@ -50,12 +48,26 @@ const withCoordinates = (person, basicRes) => {
   };
 };
 
+// A reused keep-alive connection that the local API already closed fails with
+// ECONNRESET / "socket hang up" before the request is processed. The local
+// calculations are safe to repeat, so retry those once.
+const isDroppedConnection = (err) =>
+  !err.response &&
+  (["ECONNRESET", "EPIPE"].includes(err.code) || /socket hang up/i.test(err.message));
+
 const postLocal = async (path, body) => {
-  try {
-    return await axios.post(`${LOCAL_BASE_URL}${path}`, body, {
+  const send = () =>
+    axios.post(`${LOCAL_BASE_URL}${path}`, body, {
       headers: { "Content-Type": "application/json" },
       timeout: 30000,
     });
+  try {
+    try {
+      return await send();
+    } catch (err) {
+      if (!isDroppedConnection(err)) throw err;
+      return await send();
+    }
   } catch (err) {
     const message =
       err.response?.data?.error?.message || err.response?.data?.message;
@@ -126,6 +138,7 @@ const toMatchMakingResponse = (local) => {
       k.dosha_present ?? (["Nadi", "Bhakoot"].includes(k.koot) && k.obtained === 0);
     ashtakoot_details[k.koot.toLowerCase().replace(/\s+/g, "_")] = {
       label: k.koot,
+      name: k.koot, // the mobile apps' table reads "name"
       areaOfLife: info.areaOfLife,
       score: k.obtained,
       full_score: k.full_score,
@@ -146,6 +159,9 @@ const toMatchMakingResponse = (local) => {
   const person = (basic, chart, moon, side) => ({
     name: basic?.name,
     birthPlace: basic?.birth_place,
+    lat: basic?.latitude,
+    lon: basic?.longitude,
+    rasi_lord: moon?.rashi_lord ?? koot["Graha Maitri"]?.[side],
     Moon_Sign: moon?.rashi ?? koot.Bhakoot?.[side],
     Moon_Sign_Lord: moon?.rashi_lord ?? koot["Graha Maitri"]?.[side],
     nakshatra: moon?.nakshatra ?? moonNakshatra(chart),
@@ -167,12 +183,35 @@ const toMatchMakingResponse = (local) => {
     String(v).toUpperCase() === "YES" ? "Manglik" : "Non-Manglik";
   const mangal = d.dosha_cards?.find((c) => c.title === "Mangal Dosha");
 
+  // Per-dosha fields the mobile apps read: "<key>" (description) and
+  // "<pointsKey>" ({ boy, girl } as 1 = present, 0 = absent).
+  const isYes = (v) => String(v).toLowerCase() === "yes";
+  const doshaFields = {};
+  const presentDoshas = [];
+  for (const [title, key, pointsKey] of [
+    ["Mangal Dosha", "mangaldosh", "mangaldosh_points"],
+    ["Pitra Dosha", "pitradosh", "pitradosh_points"],
+    ["Kaal Sarp Dosha", "kaalsarpdosh", "kaalsarp_points"],
+    ["Manglik Dosha (Saturn)", "manglikdosh_saturn", "manglikdosh_saturn_points"],
+    ["Manglik Dosha (Rahu/Ketu)", "manglikdosh_rahuketu", "manglikdosh_rahuketu_points"],
+  ]) {
+    const card = d.dosha_cards?.find((c) => c.title === title);
+    if (!card) continue;
+    doshaFields[key] = card.description;
+    doshaFields[pointsKey] = { boy: isYes(card.boy) ? 1 : 0, girl: isYes(card.girl) ? 1 : 0 };
+    if (isYes(card.boy) || isYes(card.girl)) presentDoshas.push(card.description);
+  }
+
   return {
     success: true,
     data: {
       score,
       full_score: fullScore || 36,
+      guna: `${score}/${fullScore || 36}`,
       percentage: d.compatibility_score,
+      ...doshaFields,
+      // Advice from the doshas found in this match, if any.
+      remedies: presentDoshas.length ? presentDoshas.join(" ") : undefined,
       boy: person(d.boy_basic_details, d.boy_lagna_chart, d.boy_moon_details, "boy"),
       girl: person(d.girl_basic_details, d.girl_lagna_chart, d.girl_moon_details, "girl"),
       ashtakoot_details,
@@ -218,17 +257,33 @@ const toLalKitabResponse = (local) => {
   // house_details lists planets with degrees attached ("Rahu 120°43'"), so
   // group the clean planet names from planetary_positions by house instead.
   const planetsByHouse = {};
+  const degreeOf = {};
   for (const p of traditional) {
     if (p.name === "Ascendant") continue;
     (planetsByHouse[p.house] ||= []).push(p.name);
+    degreeOf[p.name] = p.degree;
   }
+  // The current mahadasha's antardashas, attached to its timeline entry.
+  const current = d.dasha?.current_mahadasha;
+  const currentAntardashas = (current?.antardashas || []).map((a) => ({
+    planet: a.planet,
+    ...splitPeriod(a.period),
+  }));
 
   const houses = {};
   for (const h of d.house_details) {
     houses[h.house] = {
       sign: h.house,
-      // The house cards read p.planet, so each entry is { planet: "Sun" }.
-      planets: (planetsByHouse[h.house] || []).map((planet) => ({ planet })),
+      khanaNo: h.house, // house number, as the astrologer app's house cards read it
+      // The house cards read p.planet, so each entry is { planet: "Sun" };
+      // the mobile apps also read name, code and degree / longitude.
+      planets: (planetsByHouse[h.house] || []).map((planet) => ({
+        planet,
+        name: planet,
+        code: SHORT[planet],
+        degree: degreeOf[planet],
+        longitude: degreeOf[planet],
+      })),
       maalik: splitPlanets(h.maalik),
       pakka: splitPlanets(h.pakka),
       kismat: splitPlanets(h.kismat),
@@ -251,6 +306,8 @@ const toLalKitabResponse = (local) => {
         house: p.house,
         sign: p.sign,
         degree: p.degree,
+        longitude: p.degree, // the mobile app's name for the same value
+        position: p.position,
         nature: p.nature,
       })),
       lalKitabChart: northIndianSvg(
@@ -265,6 +322,9 @@ const toLalKitabResponse = (local) => {
         planet: x.planet,
         ...splitPeriod(x.period),
         years: parseInt(x.duration, 10),
+        ...(current && x.planet === current.planet && x.period === current.period
+          ? { antardashas: currentAntardashas }
+          : {}),
       })),
       rinAnalysis: (d.rin_analysis || []).map((r) => ({
         type: r.name,
@@ -292,9 +352,18 @@ const toVarshaphal = (v) => {
     varshaphal: {
       // Lal Kitab counts the running year of age (completed years + 1).
       age: v.running_year,
+      runningYear: v.running_year,
+      // Muntha starts in the 1st house at birth and moves one house per
+      // completed year.
+      munthaHouse:
+        v.age_completed == null ? undefined : (Number(v.age_completed) % 12) + 1,
       year: `${startYear}-${startYear + 1}`,
       houseSummary: Object.fromEntries(
-        houses.map((h) => [h.house, { planets: h.planets, planetCount: h.planet_count }]),
+        houses.map((h) => [
+          h.house,
+          // khanaNo is required: the astrologer app keys its list by it.
+          { khanaNo: h.house, planets: h.planets, planetCount: h.planet_count },
+        ]),
       ),
     },
     varshaphalChart: northIndianSvg(
@@ -319,6 +388,7 @@ const tarotImageUrl = (imageUrl, baseUrl) => {
 
 // Local tarot card -> NextAstroAPI tarot card shape.
 const toTarotCard = (c, baseUrl) => ({
+  id: c.card_id, // the mobile app tracks cards by id
   name: c.name,
   image: tarotImageUrl(c.image_url, baseUrl),
   direction: c.orientation_label,
@@ -440,6 +510,9 @@ const toNumerology = (n) => {
     const key = NUMERO_KEYS[card.title];
     if (!key) continue;
     numeroReport[key] = {
+      // The astrologer app lists only cards that have a title.
+      title: card.title,
+      category: key,
       number: card.number,
       meaning: card.trait,
       description: card.description,
@@ -447,6 +520,12 @@ const toNumerology = (n) => {
     numeroReport[`${key}Number`] = card.number;
   }
   return { numeroReport, numerologyTable: n.details_table };
+};
+
+// Lahiri ayanamsa in degrees, from a local ashtakavarga/chart response.
+const ayanamsaOf = (ashtakRes) => {
+  const v = ashtakRes?.data?.data?.calculation_metadata?.ayanamsa_value_deg;
+  return v == null ? undefined : Number(Number(v).toFixed(6));
 };
 
 const findPlanet = (chart, name) => {
@@ -470,6 +549,10 @@ const toPanchangAvakhada = (basicRes, d1, input) => {
       latitude: b.latitude,
       longitude: b.longitude,
       timezone: b.timezone_offset,
+      // The mobile apps' Basic tab also shows these.
+      sunrise: b.sunrise_time,
+      sunset: b.sunset_time,
+      ayanamsa: input.ayanamsa,
       Ascendant: d1?.ascendant?.sign,
       Moon_Sign: a.rasi,
       Sun_Sign: findPlanet(d1, "Sun")?.sign_name,
@@ -503,11 +586,13 @@ const toKpSystem = (kp, style) => {
     for (const p of h.planets || []) details[p.name] = p;
   }
   const asc = chalit?.ascendant || {};
+  const signLord = (sign) => SIGN_LORDS[Number(sign) - 1];
   const kpPlanets = [
     {
       planet_id: 99,
       planet_name: "Ascendant",
       sign: String(asc.sign),
+      sign_lord: signLord(asc.sign),
       formatted_degree: asc.formatted,
       nakshatra: asc.nakshatra,
       nakshatra_lord: asc.nakshatra_lord,
@@ -523,6 +608,7 @@ const toKpSystem = (kp, style) => {
           planet_id: i,
           planet_name: p.planet,
           sign: String(p.sign),
+          sign_lord: signLord(p.sign),
           formatted_degree: d.dms?.formatted,
           nakshatra: d.nakshatra,
           nakshatra_lord: p.nakshatra_lord,
@@ -532,17 +618,21 @@ const toKpSystem = (kp, style) => {
         };
       }),
   ];
+  const houses = (kp.kp_house_cusps || []).map((h) => ({
+    house_id: h.house,
+    sign: String(h.sign),
+    sign_lord: signLord(h.sign),
+    formatted_degree: h.dms?.formatted,
+    nakshatra: h.nakshatra,
+    nakshatra_lord: h.nakshatra_lord,
+    sub_lord: h.sub_lord,
+  }));
   return {
     chalitChart: chartSvgs(chalit)[style],
     kpPlanets,
-    houses: (kp.kp_house_cusps || []).map((h) => ({
-      house_id: h.house,
-      sign: String(h.sign),
-      formatted_degree: h.dms?.formatted,
-      nakshatra: h.nakshatra,
-      nakshatra_lord: h.nakshatra_lord,
-      sub_lord: h.sub_lord,
-    })),
+    houses,
+    // The mobile apps read the cusp table under this name.
+    kpHouseCusps: houses,
   };
 };
 
@@ -624,7 +714,11 @@ const fullKundli = async ({ dob, tob, tz, name, birthPlace, style, gender }) => 
   const charts = chartRes.data.data;
   const d1 = charts.d1_lagna_chart;
   const divCharts = divRes.data.data.charts;
-  const panchangAvakhada = toPanchangAvakhada(basicRes.data.data, d1, { dob, tob });
+  const panchangAvakhada = toPanchangAvakhada(basicRes.data.data, d1, {
+    dob,
+    tob,
+    ayanamsa: ayanamsaOf(ashtakRes),
+  });
   panchangAvakhada.panchangDetails = {
     ...panchangAvakhada.panchangDetails,
     nakshatraIndex: dashaRes.data.data.moon_details?.nakshatra_number,
@@ -670,7 +764,12 @@ const kundliBasic = async ({ dob, tob, tz, name, birthPlace, gender }) => {
   const person = toPerson({ name, dob, tob, tz, birthPlace });
   // kundli/basic requires gender; it is only echoed back, not used in calculations.
   const basicRes = await postLocal("kundli/basic", { ...person, gender: gender || "male" });
-  const chartRes = await postLocal("kundli/chart", withCoordinates(person, basicRes));
+  const located = withCoordinates(person, basicRes);
+  // Ashtakavarga is fetched only for its ayanamsa value (basic/chart don't return it).
+  const [chartRes, ashtakRes] = await Promise.all([
+    postLocal("kundli/chart", located),
+    postLocal("ashtakavarga/chart", located).catch(() => null),
+  ]);
 
   const basic = basicRes.data.data;
   const d1 = chartRes.data.data.d1_lagna_chart;
@@ -678,7 +777,7 @@ const kundliBasic = async ({ dob, tob, tz, name, birthPlace, gender }) => {
   const moon = findPlanet(d1, "Moon");
   const sunSign = findPlanet(d1, "Sun")?.sign_name;
   const ascendantSign = d1?.ascendant?.sign;
-  const base = toPanchangAvakhada(basic, d1, { dob, tob });
+  const base = toPanchangAvakhada(basic, d1, { dob, tob, ayanamsa: ayanamsaOf(ashtakRes) });
 
   return {
     success: true,
@@ -865,9 +964,12 @@ const nameMappingSvg = (mapping) => {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 };
 
-// "Destiny Number" -> "destiny", "Soul Urge Number" -> "soul_urge"
-const reportKey = (title) =>
-  String(title).toLowerCase().replace(/\s*number\s*$/, "").trim().replace(/\s+/g, "_");
+// "Destiny Number" -> "destiny", "Soul Urge Number" -> "soul" (the key the
+// mobile app reads; the website shows each card's title, not its key)
+const reportKey = (title) => {
+  const key = String(title).toLowerCase().replace(/\s*number\s*$/, "").trim().replace(/\s+/g, "_");
+  return key === "soul_urge" ? "soul" : key;
+};
 
 const fullNumerology = async ({ name, dob, tob, tz, birthplace }) => {
   const person = toPerson({ name, dob, tob: tob || "00:00", tz, birthPlace: birthplace });
@@ -893,6 +995,12 @@ const fullNumerology = async ({ name, dob, tob, tz, birthplace }) => {
     data: {
       numeroReport,
       numerologyTable: table,
+      // The same table under the name and field names the mobile app reads.
+      numeroTable: {
+        ...table,
+        date_considered: table.date,
+        destiny: table.destiny_number,
+      },
       nameMappingImage: nameMappingSvg(numero.name_mapping),
     },
   };
@@ -978,6 +1086,8 @@ const toPanchangResponse = (p) => {
       vikramSamvat: d.vikram_samvat,
       shakaSamvat: shaka.year,
       shakaSamvatName: shaka.name,
+      location: p.place,
+      timezone: d.timezone,
     },
     horaMuhurta: { dayOfWeek: p.weekday, horas },
   };
@@ -1020,6 +1130,263 @@ const toChoghadiyaResponse = (p, date) => {
   };
 };
 
+// ───────────── Monthly panchang (good/bad days, monthly choghadiya) ─────────────
+
+const MONTH_NAMES = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+
+// "2026-03", "03-2026", "2026/3", "March", "March 2026", "3" -> { year, month }
+// (a month without a year means the current year)
+const parseMonth = (value) => {
+  const now = new Date();
+  const s = String(value ?? "").trim().toLowerCase();
+  let m = /^(\d{4})[-/](\d{1,2})$/.exec(s);
+  if (m) return { year: Number(m[1]), month: Number(m[2]) };
+  m = /^(\d{1,2})[-/](\d{4})$/.exec(s);
+  if (m) return { year: Number(m[2]), month: Number(m[1]) };
+  m = /^([a-z]+)\s*(\d{4})?$/.exec(s);
+  if (m) {
+    const idx = MONTH_NAMES.findIndex((n) => n.startsWith(m[1].slice(0, 3)));
+    if (idx >= 0) return { year: Number(m[2] || now.getFullYear()), month: idx + 1 };
+  }
+  if (/^\d{1,2}$/.test(s)) return { year: now.getFullYear(), month: Number(s) };
+  return { year: now.getFullYear(), month: now.getMonth() + 1 };
+};
+
+// "28.6139,77.2090" -> { latitude, longitude }
+const parseCoordinates = (location) => {
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(String(location ?? ""));
+  return m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
+};
+
+// The local API rate-limits requests (60/minute by default). A month needs one
+// panchang request per day, so retry a 429 after a short wait.
+const postLocalRetry = async (path, body, tries = 4) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await postLocal(path, body);
+    } catch (err) {
+      if (err.response?.status !== 429 || attempt >= tries) throw err;
+      await new Promise((r) => setTimeout(r, 3000 * attempt));
+    }
+  }
+};
+
+// Resolved places, shared by all requests (place name -> coordinates).
+const placeCache = new Map();
+
+// Resolve a place once (name or "lat,lon") so the per-day panchang requests
+// don't each look it up (the place lookup is rate limited).
+const resolvePlace = async (location, isoDate) => {
+  const coords = parseCoordinates(location);
+  if (coords) return coords; // the local API derives the timezone from coordinates
+  const key = String(location).trim().toLowerCase();
+  if (placeCache.has(key)) return placeCache.get(key);
+  const res = await postLocalRetry("kundli/basic", {
+    name: "Place",
+    date_of_birth: isoDate,
+    birth_time: "12:00:00",
+    birth_place: location,
+    gender: "male",
+  });
+  const b = res.data.data.basic_details;
+  const place = { latitude: b.latitude, longitude: b.longitude, timezone: b.timezone };
+  if (placeCache.size > 500) placeCache.clear();
+  placeCache.set(key, place);
+  return place;
+};
+
+// Run fn over items, at most `limit` at a time, keeping the order.
+const mapLimit = async (items, limit, fn) => {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+};
+
+// A month's panchang for a place, shared by all users for 12 hours (good/bad
+// days and monthly choghadiya both use it; each month costs ~31 requests).
+const MONTH_TTL_MS = 12 * 60 * 60 * 1000;
+const monthCache = new Map(); // key -> { at, promise }
+
+// Local panchang for every day of a month: [{ date: "DD-MM-YYYY", p }]
+const monthPanchang = async (location, monthValue) => {
+  const { year, month } = parseMonth(monthValue);
+  const days = new Date(year, month, 0).getDate();
+  const iso = (d) => `${year}-${pad2(month)}-${pad2(d)}`;
+  const place = await resolvePlace(location, iso(1));
+  const key = `${Number(place.latitude).toFixed(3)},${Number(place.longitude).toFixed(3)}|${year}-${month}`;
+
+  const hit = monthCache.get(key);
+  if (hit && Date.now() - hit.at < MONTH_TTL_MS) return hit.promise;
+
+  const promise = (async () => {
+    const list = Array.from({ length: days }, (_, i) => i + 1);
+    const results = await mapLimit(list, 3, async (d) => {
+      const res = await postLocalRetry("panchang/calculate", { date: iso(d), ...place });
+      return { date: `${pad2(d)}-${pad2(month)}-${year}`, p: res.data.data };
+    });
+    return { year, month, results };
+  })();
+  if (monthCache.size > 200) monthCache.clear();
+  monthCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => monthCache.delete(key)); // don't keep failures
+  return promise;
+};
+
+// Rikta tithis (4th, 9th, 14th) and Amavasya are the classical inauspicious days.
+const RIKTA_TITHIS = ["chaturthi", "navami", "chaturdashi"];
+const dayQuality = (p) => {
+  const tithi = String(p.panchang_details?.tithi || "");
+  const t = tithi.toLowerCase();
+  if (/amavas/.test(t)) return { status: "Bad", reason: `Amavasya (${tithi})` };
+  const rikta = RIKTA_TITHIS.find((r) => t.includes(r));
+  if (rikta) return { status: "Bad", reason: `Rikta tithi (${tithi})` };
+  return { status: "Good", reason: `${tithi} is not a Rikta tithi or Amavasya` };
+};
+
+const goodBadDays = async (location, monthValue) => {
+  const { year, month, results } = await monthPanchang(location, monthValue);
+  const days = results.map(({ date, p }) => ({
+    date,
+    dayOfWeek: p.weekday,
+    tithi: p.panchang_details?.tithi,
+    paksha: p.panchang_details?.paksha,
+    nakshatra: String(p.panchang_details?.nakshatra || "").replace(/\s*\(\d+\)$/, ""),
+    ...dayQuality(p),
+  }));
+  return {
+    success: true,
+    data: {
+      location,
+      month: `${year}-${pad2(month)}`,
+      goodDays: days.filter((d) => d.status === "Good").map((d) => d.date),
+      badDays: days.filter((d) => d.status === "Bad").map((d) => d.date),
+      days,
+    },
+  };
+};
+
+const monthlyChoghadiya = async (location, monthValue) => {
+  const { year, month, results } = await monthPanchang(location, monthValue);
+  return {
+    success: true,
+    data: {
+      location,
+      month: `${year}-${pad2(month)}`,
+      days: results.map(({ date, p }) => ({
+        date,
+        ...toChoghadiyaResponse(p, date).data.choghadiyaMuhurat,
+      })),
+    },
+  };
+};
+
+// ───────────────────── Dosha (local) ─────────────────────
+
+// One person's doshas, from the local matching engine (person checked against itself).
+const doshaReport = async ({ dob, tob, tz, birthPlace }) => {
+  const person = toPerson({ name: "User", dob, tob, tz, birthPlace });
+  const basicRes = await postLocal("kundli/basic", { ...person, gender: "male" });
+  const located = withCoordinates(person, basicRes);
+  const matchRes = await postLocal("matching/calculate", { boy: located, girl: located });
+  const match = matchRes.data.data;
+  const tab = toDoshaTab(match);
+  const present = (title) =>
+    String(match.dosha_cards?.find((c) => c.title === title)?.boy).toLowerCase() === "yes";
+  return {
+    success: true,
+    data: {
+      manglik: tab.Manglik,
+      kalsarpa: tab.Kalsarpa,
+      doshas: (match.dosha_cards || []).map((c) => ({
+        title: c.title,
+        present: present(c.title),
+      })),
+    },
+  };
+};
+
+// ───────────────────── Transit planets (local) ─────────────────────
+
+// Transit positions at a date/time/place, with each planet's house counted
+// from the natal Ascendant and natal Moon (whole-sign, sidereal).
+const transitPlanets = async ({
+  dob, tob, tz, birthPlace, transit_date, transit_time, transit_tz, transitPlace,
+}) => {
+  const natalPerson = toPerson({ name: "User", dob, tob, tz, birthPlace });
+  const basicRes = await postLocal("kundli/basic", { ...natalPerson, gender: "male" });
+  const natalLocated = withCoordinates(natalPerson, basicRes);
+  const samePlace =
+    !transitPlace ||
+    String(transitPlace).trim().toLowerCase() === String(birthPlace).trim().toLowerCase();
+  const transitPerson = toPerson({
+    name: "Transit",
+    dob: transit_date || dob,
+    tob: transit_time || "00:00",
+    tz: transit_tz ?? tz,
+    birthPlace: transitPlace || birthPlace,
+  });
+  const [natalRes, transitRes] = await Promise.all([
+    postLocal("kundli/chart", natalLocated),
+    postLocal(
+      "kundli/chart",
+      samePlace
+        ? {
+            ...transitPerson,
+            latitude: natalLocated.latitude,
+            longitude: natalLocated.longitude,
+            timezone: natalLocated.timezone,
+          }
+        : transitPerson,
+    ),
+  ]);
+  const natal = natalRes.data.data.d1_lagna_chart;
+  const transit = transitRes.data.data.d1_lagna_chart;
+  const ascSign = SIGN_NAMES.indexOf(natal?.ascendant?.sign) + 1;
+  const moonSign = SIGN_NAMES.indexOf(findPlanet(natal, "Moon")?.sign_name) + 1;
+  const houseFrom = (from, sign) => (from > 0 ? ((sign - from + 12) % 12) + 1 : undefined);
+  const natalSignOf = (name) => findPlanet(natal, name)?.sign_name;
+
+  const planets = (transit?.houses || []).flatMap((h) =>
+    (h.planets || [])
+      .filter((p) => !p.is_ascendant && p.name !== "Ascendant" && !OUTER.includes(p.name))
+      .map((p) => ({
+        planet: p.name,
+        sign: h.sign_name,
+        signNumber: h.sign_number,
+        degree: p.dms?.formatted,
+        nakshatra: p.nakshatra,
+        retro: !!p.is_retrograde,
+        natalSign: natalSignOf(p.name),
+        houseFromAscendant: houseFrom(ascSign, h.sign_number),
+        houseFromMoon: houseFrom(moonSign, h.sign_number),
+      })),
+  );
+  return {
+    success: true,
+    data: {
+      birth: { dob, tob, place: birthPlace },
+      transit: {
+        date: transit_date || dob,
+        time: transit_time || "00:00",
+        place: transitPlace || birthPlace,
+      },
+      natalAscendant: natal?.ascendant?.sign,
+      natalMoonSign: SIGN_NAMES[moonSign - 1],
+      planets,
+    },
+  };
+};
+
 // ───────────────────── Horoscope (local) ─────────────────────
 
 // Day boundaries and "today" follow Indian time, as the app's other requests do.
@@ -1032,21 +1399,37 @@ const calculateHoroscope = async ({ zodiac, type, date, week, year }) => {
     ...(week && { week }),
     ...(year && { year }),
   });
-  return { data: res.data };
+  const body = res.data;
+  const preds = body?.data?.Predictions;
+  if (preds && typeof preds === "object") {
+    body.data.Predictions =
+      type === "yearly"
+        ? Object.fromEntries(
+            Object.entries(preds).map(([quarter, v]) => [
+              quarter,
+              v && typeof v === "object" ? renameSections(v, type) : v,
+            ]),
+          )
+        : renameSections(preds, type);
+  }
+  return { data: body };
 };
 
+// Section names the mobile app's horoscope screen looks for. The website shows
+// whatever names it receives, so it works with these as well.
+const renameSections = (sections, type) =>
+  Object.fromEntries(
+    Object.entries(sections).map(([k, v]) => {
+      if (k === "Finance") return ["Finances", v];
+      if (k === "Love") return ["Relationship", v];
+      if (k === "Overview" && type === "daily") return ["Daily Overview", v];
+      return [k, v];
+    }),
+  );
+
+// Every entry calls the local Astroveduvani_api (Python). Location search is
+// done with Google Places in kundliService / userAstrologyService.
 const API = {
-  LOCATION_SUGGESTIONS: (input) =>
-    `${BASE_URL}location/suggestions?input=${encodeURIComponent(input)}`,
-
-  LOCATION_BY_NAME: (query) =>
-    `${BASE_URL}location/allsuggestions?input=${encodeURIComponent(query)}`,
-
-  LOCATION_BY_COORDINATES: (lat, lon) =>
-    `${BASE_URL}location/search-coordinates?lat=${encodeURIComponent(
-      lat,
-    )}&lon=${encodeURIComponent(lon)}`,
-
   // Local API. Returns an axios-style { data } in NextAstroAPI's gun-milan shape.
   MATCH_MAKING: async ({
     boy_name,
@@ -1100,15 +1483,21 @@ const API = {
   YEARLY_HOROSCOPE: ({ zodiac, year = new Date().getFullYear() }) =>
     calculateHoroscope({ zodiac, type: "yearly", year: Number(year) }),
 
-  BIG_DAILY_HOROSCOPE: ({ zodiac, date, lang = "en", type = "big" }) =>
-    `${BASE_URL}/api/daily-horoscope?zodiac=${encodeURIComponent(
-      zodiac,
-    )}&date=${encodeURIComponent(date)}&lang=${encodeURIComponent(
-      lang,
-    )}&type=${encodeURIComponent(type)}`,
+  // Local API: the daily transit horoscope. zodiac is a sign number (1-12) or name.
+  BIG_DAILY_HOROSCOPE: ({ zodiac, date }) =>
+    calculateHoroscope({
+      zodiac: /^\d+$/.test(String(zodiac))
+        ? SIGN_NAMES[Number(zodiac) - 1]?.toLowerCase()
+        : String(zodiac).toLowerCase(),
+      type: "daily",
+      date,
+    }),
 
-  GOOD_BAD_DAYS: (location, month) =>
-    `${BASE_URL}v1/panchang/choghadiya/monthly?location=${encodeURIComponent(location)}&month=${encodeURIComponent(month)}`,
+  // Local API: every day of the month rated Good/Bad from its tithi.
+  // month: "2026-03", "March", ...; location: a place name or "lat,lon".
+  GOOD_BAD_DAYS: async (location, month) => ({
+    data: await goodBadDays(location, month),
+  }),
   // ── Local API kundli sections. Each returns an axios-style { data } with
   // { success, data }, built by the same mappers as the full kundli.
   KUNDLI: async (params) => ({ data: await kundliBasic(params) }),
@@ -1116,12 +1505,30 @@ const API = {
   KUNDLI_DETAILS: async (params) => {
     const res = await postLocal("kundli/chart", toPerson(params));
     const charts = res.data.data;
+    const d1 = toVedicChart(charts.d1_lagna_chart);
+    const d9 = toVedicChart(charts.d9_navamsa_chart);
+    const numerology = toNumerology(charts.numerology);
     return {
       data: {
         success: true,
         data: {
-          d1: toVedicChart(charts.d1_lagna_chart),
-          d9: toVedicChart(charts.d9_navamsa_chart),
+          d1,
+          d9,
+          // Field names the mobile app's Kundli tab reads.
+          charts: {
+            lagna_north: d1.charts.north,
+            lagna_south: d1.charts.south,
+            navamsa_north: d9.charts.north,
+            navamsa_south: d9.charts.south,
+          },
+          numerologyTable: numerology?.numerologyTable,
+          numero_full_report: numerology
+            ? Object.fromEntries(
+                Object.entries(numerology.numeroReport).filter(
+                  ([, v]) => v && typeof v === "object",
+                ),
+              )
+            : undefined,
         },
       },
     };
@@ -1151,7 +1558,14 @@ const API = {
           div: code,
           style: chartStyle,
           chart: charts?.[code] ? chartSvgs(charts[code])[chartStyle] : null,
-          charts: toDivisionalCharts(charts, chartStyle),
+          // Keyed by chart code (D1, D9, CHALIT, ...), as the mobile apps' Charts
+          // tab names them. Only the apps call this endpoint; the website's full
+          // kundli uses toDivisionalCharts.
+          charts: Object.fromEntries(
+            Object.entries(charts || {})
+              .map(([c, chart]) => [c, chartSvgs(chart)[chartStyle]])
+              .filter(([, svg]) => svg),
+          ),
         },
       },
     };
@@ -1165,19 +1579,10 @@ const API = {
   // Local API. Returns an axios-style { data } in NextAstroAPI's free-report shape.
   ASCENDANT_REPORT: async (params) => ({ data: await freeReport(params) }),
 
-  MONTHLY_CHOGHADIYA: ({ location, month }) =>
-    `${BASE_URL}/api/monthly-choghadiya?location=${encodeURIComponent(
-      location,
-    )}&month=${encodeURIComponent(month)}`,
-
-  FULL_NUMEROLOGY: ({ name, dob, tob, tz, birthplace }) =>
-    `${BASE_URL}/api/full-numerology?name=${encodeURIComponent(
-      name,
-    )}&dob=${encodeURIComponent(dob)}&tob=${encodeURIComponent(
-      tob,
-    )}&tz=${encodeURIComponent(tz)}&birthplace=${encodeURIComponent(
-      birthplace,
-    )}`,
+  // Local API: choghadiya for every day of the month.
+  MONTHLY_CHOGHADIYA: async ({ location, month }) => ({
+    data: await monthlyChoghadiya(location, month),
+  }),
 
   // Local API (same calculation as PANCHANG). axios-style { data }.
   CHOGHADIYA: async ({ location, date }) => ({
@@ -1187,59 +1592,32 @@ const API = {
   // Local API. Returns an axios-style { data } in NextAstroAPI's kundali/full shape.
   FULL_KUNDLI: async (params) => ({ data: await fullKundli(params) }),
 
-  DOSHA: ({ dob, tob, birthPlace, tz, lang = "en" }) =>
-    `${BASE_URL}/api/dosha?dob=${encodeURIComponent(
-      dob,
-    )}&tob=${encodeURIComponent(tob)}&birthPlace=${encodeURIComponent(
-      birthPlace,
-    )}&tz=${encodeURIComponent(tz)}&lang=${encodeURIComponent(lang)}`,
+  // Local API: one person's doshas (Manglik, Kaal Sarp, Pitra, ...).
+  DOSHA: async ({ dob, tob, birthPlace, tz }) => ({
+    data: await doshaReport({ dob, tob, tz, birthPlace }),
+  }),
 
-  TRANSIT_PLANETS: ({
-    dob,
-    tob,
-    tz,
-    transit_date,
-    transit_time,
-    transit_tz,
-    house_type,
-    zodiac_type,
-    lang = "en",
-    direction,
-    birthPlace,
-    transitPlace,
-  }) =>
-    `${BASE_URL}/api/transit-planets?dob=${encodeURIComponent(
-      dob,
-    )}&tob=${encodeURIComponent(tob)}&tz=${encodeURIComponent(
-      tz,
-    )}&transit_date=${encodeURIComponent(
-      transit_date,
-    )}&transit_time=${encodeURIComponent(
-      transit_time,
-    )}&transit_tz=${encodeURIComponent(
-      transit_tz,
-    )}&house_type=${encodeURIComponent(
-      house_type,
-    )}&zodiac_type=${encodeURIComponent(zodiac_type)}&lang=${encodeURIComponent(
-      lang,
-    )}&direction=${encodeURIComponent(
-      direction,
-    )}&birthPlace=${encodeURIComponent(
-      birthPlace,
-    )}&transitPlace=${encodeURIComponent(transitPlace)}`,
-  TAROT_SESSION: () => `${BASE_URL}v1/tarot/session`,
+  // Local API: transit positions with houses from the natal Ascendant and Moon.
+  // (Whole-sign sidereal houses; house_type / zodiac_type are not used.)
+  TRANSIT_PLANETS: async (params) => ({ data: await transitPlanets(params) }),
 
-  TAROT_REVEAL: ({ cardName, direction = "upright", lang = "en" }) =>
-    `${BASE_URL}v1/tarot/reveal` +
-    `?cardName=${encodeURIComponent(cardName)}` +
-    `&direction=${encodeURIComponent(direction)}` +
-    `&lang=${encodeURIComponent(lang)}`,
+  // Local API: a three-card draw that the user reveals card by card.
+  // Returns an axios-style { data } with { cards: [...] }.
+  TAROT_SESSION: async (baseUrl) => {
+    const res = await drawTarot("three_card", baseUrl);
+    return { data: { cards: res.data.data.spread } };
+  },
+
+  // Finds a card in a session's cards (by id or name). Returns the card or undefined.
+  TAROT_REVEAL: ({ cardName, cards = [] }) => {
+    const key = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return cards.find((c) => key(c.id) === key(cardName) || key(c.name) === key(cardName));
+  },
 
   // Local API. Return an axios-style { data } in NextAstroAPI's quick tarot shape.
   TAROT_ONE_CARD: (baseUrl) => drawTarot("one_card", baseUrl),
   TAROT_THREE_CARD: (baseUrl) => drawTarot("three_card", baseUrl),
   // Local API. Returns an axios-style { data } in NextAstroAPI's numero/full shape.
-  // (This later key overrides the older FULL_NUMEROLOGY entry above.)
   FULL_NUMEROLOGY: async (params) => ({ data: await fullNumerology(params) }),
 
   // Local API. Returns an axios-style { data } in NextAstroAPI's lal-kitab shape.

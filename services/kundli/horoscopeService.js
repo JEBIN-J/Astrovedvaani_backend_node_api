@@ -196,7 +196,8 @@ const getBigHoroscope = async ({
       logger.info(
         `[Horoscope] rasi missing for userId=${userId}, fetching from Kundli`,
       );
-      const kundliData = await kundliService.getKundliData(userId);
+      // isQuery: userId is a profile id (relative), so look the profile up by id.
+      const kundliData = await kundliService.getKundliData(userId, {}, !!isQuery);
       rasi = kundliData?.data?.basicDetails?.rasi;
     }
 
@@ -232,17 +233,19 @@ const getBigHoroscope = async ({
       return cachedData;
     }
 
-    const apiUrl = API.BIG_DAILY_HOROSCOPE({
-      zodiac: zodiacNumber,
-      date: formattedDate,
-      lang,
-      type,
-    });
-    logger.info(`[Horoscope] Prepared API URL: ${apiUrl}`);
+    logger.info(
+      `[Horoscope] Calculating big daily horoscope: zodiac=${zodiacNumber}, date=${formattedDate}`,
+    );
 
     let response;
     try {
-      response = await axios.get(apiUrl);
+      // Calculated by the local astro engine.
+      response = await API.BIG_DAILY_HOROSCOPE({
+        zodiac: zodiacNumber,
+        date: formattedDate,
+        lang,
+        type,
+      });
     } catch (err) {
       logger.error(
         `[Horoscope] API request failed: ${err.message}`,
@@ -318,13 +321,9 @@ const getGoodBadDays = async (userId, isQuery, location, month) => {
       return cachedData;
     }
 
-    const apiUrl = API.GOOD_BAD_DAYS(location, month);
-    logger.info(`[GoodBadDays] Prepared API URL: ${apiUrl}`);
-
-    const response = await axios.get(apiUrl, {
-      headers: getSaasHeaders(),
-      timeout: 15000,
-    });
+    logger.info(`[GoodBadDays] Calculating: location=${location}, month=${month}`);
+    // Calculated by the local astro engine (panchang for each day of the month).
+    const response = await API.GOOD_BAD_DAYS(location, month);
 
     await CacheService.set(cacheKey, response.data, HOROSCOPE_CACHE_TTL);
     logger.info(`[GoodBadDays] Cached data for userId=${userId}`);

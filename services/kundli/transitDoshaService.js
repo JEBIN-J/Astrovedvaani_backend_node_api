@@ -63,12 +63,9 @@ const getDosha = async (userId, id, query = {}, isQuery = false) => {
     return cachedData;
   }
 
-  const apiUrl = API.DOSHA({ dob, tob, birthPlace, tz, lang });
-  logger.info(`Fetching Dosha from API: ${apiUrl}`);
-  const response = await axios.get(apiUrl, {
-    headers: getSaasHeaders(),
-    timeout: 15000,
-  });
+  logger.info(`Calculating Dosha: dob=${dob}, tob=${tob}, birthPlace=${birthPlace}`);
+  // Calculated by the local astro engine.
+  const response = await API.DOSHA({ dob, tob, birthPlace, tz, lang });
   await CacheService.set(cacheKey, response.data, 24 * 60 * 60);
   logger.info(`Cached Dosha for key=${cacheKey}`);
 
@@ -195,7 +192,9 @@ const getTransitPlanets = async (userId, id, query = {}, isQuery = false) => {
     logger.info("Returning Transit Planets from cache for key=" + cacheKey);
     return cachedData;
   }
-  const apiUrl = API.TRANSIT_PLANETS({
+  logger.info("Calculating Transit Planets for transit_date=" + transit_date);
+  // Calculated by the local astro engine.
+  const response = await API.TRANSIT_PLANETS({
     dob,
     tob,
     tz,
@@ -208,11 +207,6 @@ const getTransitPlanets = async (userId, id, query = {}, isQuery = false) => {
     direction,
     birthPlace,
     transitPlace,
-  });
-  logger.info("Fetching Transit Planets from API: " + apiUrl);
-  const response = await axios.get(apiUrl, {
-    headers: getSaasHeaders(),
-    timeout: 15000,
   });
   await CacheService.set(cacheKey, response.data, 24 * 60 * 60);
   logger.info("Cached Transit Planets for key=" + cacheKey);

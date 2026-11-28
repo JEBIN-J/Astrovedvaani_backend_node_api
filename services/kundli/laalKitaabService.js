@@ -43,7 +43,8 @@ const getLaalKitaabData = async ({
 
   if ((hour === undefined || min === undefined) && profile?.birthTime) {
     const timeStr = profile.birthTime.trim();
-    let match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    // "02:00 PM", "14:00" or "14:00:00" (seconds are ignored)
+    let match = timeStr.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
     if (match) {
       let h = parseInt(match[1], 10);
       const m = parseInt(match[2], 10);
@@ -53,7 +54,7 @@ const getLaalKitaabData = async ({
       hour = hour ?? h;
       min = min ?? m;
     } else {
-      match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+      match = timeStr.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
       if (match) {
         hour = hour ?? parseInt(match[1], 10);
         min = min ?? parseInt(match[2], 10);

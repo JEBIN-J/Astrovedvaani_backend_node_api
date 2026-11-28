@@ -104,6 +104,9 @@ const getPanchangData = async ({ userId, date, location, tz, lang = "en" }) => {
     const responseData = {
       ...panchangResponse.data,
       chogadiya: chogadiyaResponse.data.data,
+      // The mobile app reads these at the top level.
+      date: chogadiyaResponse.data.data.date,
+      choghadiyaMuhurat: chogadiyaResponse.data.data.choghadiyaMuhurat,
     };
 
     await CacheService.set(cacheKey, responseData, 2 * 60 * 60);

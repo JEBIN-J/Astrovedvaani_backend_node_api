@@ -20,7 +20,7 @@ const requestBaseUrl = (req) => {
 const createTarotSession = asyncHandler(async (req, res) => {
   const userId = req.user?._id || null;
 
-  const data = await tarotService.generateTarotSession(userId);
+  const data = await tarotService.generateTarotSession(userId, requestBaseUrl(req));
 
   res.status(200).json({
     success: true,
@@ -28,16 +28,17 @@ const createTarotSession = asyncHandler(async (req, res) => {
   });
 });
 
+// POST (body) or GET (query: the astrologer app sends ?cardName=...)
 const revealTarotCard = asyncHandler(async (req, res) => {
-  const { cardName, direction, lang } = req.body;
+  const { cardName } = { ...req.query, ...(req.body || {}) };
   if (!cardName) {
     throw new BadRequestError("cardName is required");
   }
 
   const data = await tarotService.revealTarotCard({
     cardName,
-    direction,
-    lang,
+    userId: req.user?._id || null,
+    baseUrl: requestBaseUrl(req),
   });
 
   res.status(200).json({
@@ -49,7 +50,7 @@ const revealTarotCard = asyncHandler(async (req, res) => {
 // 🃏 One Card
 const oneCardTarot = async (req, res) => {
   try {
-    const data = await tarotService.oneCard(requestBaseUrl(req));
+    const data = await tarotService.oneCard(requestBaseUrl(req), req.user?._id || null);
 
     return res.status(200).json({
       success: true,
@@ -70,7 +71,7 @@ const threeCardTarot = async (req, res) => {
   try {
     logger.info("[API] Three Card Tarot request");
 
-    const data = await tarotService.threeCard(requestBaseUrl(req));
+    const data = await tarotService.threeCard(requestBaseUrl(req), req.user?._id || null);
 
     return res.status(200).json({
       success: true,

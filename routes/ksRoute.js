@@ -135,6 +135,8 @@ router.get(
 
 router.get("/session", authMiddleware, tarotController.createTarotSession);
 router.post("/reveal", authMiddleware, tarotController.revealTarotCard);
+// The astrologer app calls reveal with GET and ?cardName=
+router.get("/reveal", authMiddleware, tarotController.revealTarotCard);
 router.get("/tarot/one-card", authMiddleware, tarotController.oneCardTarot);
 router.get("/tarot/three-card", authMiddleware, tarotController.threeCardTarot);
 
