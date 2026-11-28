@@ -1,4 +1,5 @@
 import axios from "axios";
+import zlib from "zlib";
 
 // Local Astroveduvani_api (Python). Replaces NextAstroAPI for matchmaking,
 // Lal Kitab and tarot. Start it with PORT=5001 and GEOCODING_PROVIDER=nominatim.
@@ -944,24 +945,129 @@ const freeReport = async ({ dob, tob, tz, name, birthPlace, gender }) => {
 
 // ───────────────────── Numerology calculator (FULL_NUMEROLOGY) ─────────────────────
 
-// Letter -> value grid for the name, as an SVG image (the page shows it as an <img>).
-const nameMappingSvg = (mapping) => {
+// Letter -> value grid for the name, as a base64 PNG. PNG (not SVG) because the
+// mobile app shows it with React Native's <Image>, which cannot draw SVG; the
+// website's <img> shows PNG too. Drawn with a 5x7 pixel font, no image library.
+const GLYPHS = {
+  A: "01110100011000111111100011000110001", B: "11110100011000111110100011000111110",
+  C: "01110100011000010000100001000101110", D: "11110100011000110001100011000111110",
+  E: "11111100001000011110100001000011111", F: "11111100001000011110100001000010000",
+  G: "01110100011000010111100011000101111", H: "10001100011000111111100011000110001",
+  I: "01110001000010000100001000010001110", J: "00111000100001000010000101001001100",
+  K: "10001100101010011000101001001010001", L: "10000100001000010000100001000011111",
+  M: "10001110111010110101100011000110001", N: "10001100011100110101100111000110001",
+  O: "01110100011000110001100011000101110", P: "11110100011000111110100001000010000",
+  Q: "01110100011000110001101011001001101", R: "11110100011000111110101001001010001",
+  S: "01111100001000001110000010000111110", T: "11111001000010000100001000010000100",
+  U: "10001100011000110001100011000101110", V: "10001100011000110001100010101000100",
+  W: "10001100011000110101101011010101010", X: "10001100010101000100010101000110001",
+  Y: "10001100010101000100001000010000100", Z: "11111000010001000100010001000011111",
+  0: "01110100011001110101110011000101110", 1: "00100011000010000100001000010001110",
+  2: "01110100010000100010001000100011111", 3: "11111000100010000010000011000101110",
+  4: "00010001100101010010111110001000010", 5: "11111100001111000001000011000101110",
+  6: "00110010001000011110100011000101110", 7: "11111000010001000100010000100001000",
+  8: "01110100011000101110100011000101110", 9: "01110100011000101111000010001001100",
+};
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+const crc32 = (buf) => {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
+const pngChunk = (type, data) => {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([len, body, crc]);
+};
+
+// Splits the mapping into one row per word of the name (letters only are
+// mapped); falls back to rows of 10 if the counts don't line up.
+const mappingRows = (mapping, name) => {
+  const words = String(name || "")
+    .toUpperCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^A-Z]/g, "").length)
+    .filter(Boolean);
+  const rows = [];
+  if (words.reduce((a, b) => a + b, 0) === mapping.length) {
+    let i = 0;
+    for (const n of words) rows.push(mapping.slice(i, (i += n)));
+  } else {
+    for (let i = 0; i < mapping.length; i += 10) rows.push(mapping.slice(i, i + 10));
+  }
+  return rows;
+};
+
+const nameMappingPng = (mapping, name) => {
   if (!mapping?.length) return undefined;
-  const cell = 44;
-  const width = mapping.length * cell + 2;
-  const cells = mapping
-    .map(({ letter, value }, i) => {
-      const x = 1 + i * cell;
-      return (
-        `<rect x="${x}" y="1" width="${cell}" height="${cell * 2}" fill="#fff" stroke="#1c3a70"/>` +
-        `<line x1="${x}" y1="${cell + 1}" x2="${x + cell}" y2="${cell + 1}" stroke="#1c3a70"/>` +
-        `<text x="${x + cell / 2}" y="${cell / 2 + 7}" font-size="20" font-weight="700" fill="#1c3a70" text-anchor="middle">${letter}</text>` +
-        `<text x="${x + cell / 2}" y="${cell * 1.5 + 7}" font-size="18" fill="#c0392b" text-anchor="middle">${value}</text>`
-      );
-    })
-    .join("");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${cell * 2 + 2}" width="${width}" height="${cell * 2 + 2}" font-family="Arial, sans-serif">${cells}</svg>`;
-  return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+  const rows = mappingRows(mapping, name);
+  const CELL = 64, SCALE = 4, PAD = 12, GAP = 12, LINE = 2;
+  const cols = Math.max(...rows.map((r) => r.length));
+  const width = PAD * 2 + cols * CELL;
+  const height = PAD * 2 + rows.length * CELL * 2 + (rows.length - 1) * GAP;
+  const px = Buffer.alloc(width * height * 3, 0xff); // white RGB canvas
+
+  const NAVY = [0x1c, 0x3a, 0x70], RED = [0xc0, 0x39, 0x2b];
+  const fill = (x, y, w, h, [r, g, b]) => {
+    for (let yy = Math.max(0, y); yy < Math.min(height, y + h); yy++)
+      for (let xx = Math.max(0, x); xx < Math.min(width, x + w); xx++) {
+        const o = (yy * width + xx) * 3;
+        px[o] = r; px[o + 1] = g; px[o + 2] = b;
+      }
+  };
+  // Text centred in the box at (x, y, w, h)
+  const text = (str, x, y, w, h, color) => {
+    const chars = String(str).toUpperCase().split("").filter((ch) => GLYPHS[ch]);
+    const tw = chars.length * 6 * SCALE - SCALE;
+    let cx = x + Math.round((w - tw) / 2);
+    const cy = y + Math.round((h - 7 * SCALE) / 2);
+    for (const ch of chars) {
+      const g = GLYPHS[ch];
+      for (let i = 0; i < 35; i++)
+        if (g[i] === "1") fill(cx + (i % 5) * SCALE, cy + Math.floor(i / 5) * SCALE, SCALE, SCALE, color);
+      cx += 6 * SCALE;
+    }
+  };
+
+  rows.forEach((row, r) => {
+    const top = PAD + r * (CELL * 2 + GAP);
+    row.forEach(({ letter, value }, c) => {
+      const left = PAD + c * CELL;
+      fill(left, top, CELL + LINE, LINE, NAVY); // top
+      fill(left, top + CELL, CELL + LINE, LINE, NAVY); // middle
+      fill(left, top + CELL * 2, CELL + LINE, LINE, NAVY); // bottom
+      fill(left, top, LINE, CELL * 2 + LINE, NAVY); // left
+      fill(left + CELL, top, LINE, CELL * 2 + LINE, NAVY); // right
+      text(letter, left, top, CELL, CELL, NAVY);
+      text(value, left, top + CELL, CELL, CELL, RED);
+    });
+  });
+
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (width * 3 + 1)] = 0; // filter: none
+    px.copy(raw, y * (width * 3 + 1) + 1, y * width * 3, (y + 1) * width * 3);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // colour type: RGB
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  return `data:image/png;base64,${png.toString("base64")}`;
 };
 
 // "Destiny Number" -> "destiny", "Soul Urge Number" -> "soul" (the key the
@@ -1001,7 +1107,7 @@ const fullNumerology = async ({ name, dob, tob, tz, birthplace }) => {
         date_considered: table.date,
         destiny: table.destiny_number,
       },
-      nameMappingImage: nameMappingSvg(numero.name_mapping),
+      nameMappingImage: nameMappingPng(numero.name_mapping, name),
     },
   };
 };
